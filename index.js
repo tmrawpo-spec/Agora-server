@@ -7,14 +7,25 @@ const app = express();
 app.use(cors());
 app.use(express.json()); // JSON 요청을 읽기 위해 필수
 
-// ✅ 1. 파이어베이스 어드민 초기화 (로컬 파일 방식)
-// 폴더에 넣은 firebase-service-account.json 파일을 직접 불러옵니다.
-const serviceAccount = require("./firebase-service-account.json");
-
+// ✅ [보안 수정] 파이어베이스 어드민 초기화 (환경 변수 방식)
+// 더 이상 로컬 파일을 require하지 않고, Render 대시보드에 저장한 데이터를 읽어옵니다.
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
+  try {
+    const serviceAccountData = process.env.FIREBASE_SERVICE_ACCOUNT;
+    
+    if (serviceAccountData) {
+      // 환경 변수에 저장된 JSON 문자열을 객체로 변환합니다.
+      const serviceAccount = JSON.parse(serviceAccountData);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log("🔥 Firebase Admin Initialized via Environment Variable");
+    } else {
+      console.error("❌ 에러: Render 대시보드에 'FIREBASE_SERVICE_ACCOUNT' 환경 변수가 설정되지 않았습니다.");
+    }
+  } catch (error) {
+    console.error("❌ Firebase 초기화 에러:", error);
+  }
 }
 
 const APP_ID = process.env.APP_ID;
@@ -56,7 +67,7 @@ app.post('/send-call-notification', async (req, res) => {
       },
       // 2. 앱 내부(RootLayout.tsx)에서 실시간으로 처리할 데이터
       data: {
-        type: 'VOICE_CALL', // 또는 'CALL_REQUEST' (RootLayout 조건과 일치해야 함)
+        type: 'VOICE_CALL', 
         callerName: String(callerName),
         callerId: String(callerId || ""),
         convoId: String(convoId),
