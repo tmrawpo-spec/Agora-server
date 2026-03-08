@@ -1,5 +1,6 @@
 import { RtcTokenBuilder, RtcRole } from "agora-token";
-import express, { Request, Response } from "express";
+import express from "express";
+import type { Request, Response } from "express";
 import cors from "cors";
 import * as admin from "firebase-admin";
 
