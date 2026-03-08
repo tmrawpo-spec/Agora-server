@@ -13,8 +13,36 @@ const serviceAccount = {
   type: "service_account",
   project_id: "nighton-f6605",
   private_key_id: "45c44cfce7b24c8278419520745e2ced92dc8eb5",
-  // ✅ JSON의 private_key 값을 그대로 넣고 .replace()를 붙여서 줄바꿈을 처리합니다.
-  private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCwrmy451kMV90L\nvZJkX2jy3fzXmxU1MZNx7f3Q95Gc8LrqiHz4AefqEblRIen8jZZbujo9ZD1INH78\nRqAqF4pFR2SCftMWR3PegwjdO2Er7q4+XOyKoVKrUzfY38m4FnJFguFVj2X3M49k\nYJW0p37ulC5mxoWaINbmKoNKFSHKQ8NoJv9fSsvxVzzSSQD1hPV/2WsGeSbEkLcp\n7VIVjecCMKeupPYLLvwQS+99FS9VbuG0BByNI2gr22anaeD/+gdUZGp4Mu8Vojqv\n81g8PGzKKxpJ2ucUDtT8nBOrXoBquOyIM87KtTDdWbRxTH9hPkMUVgxpdX3R33Ch\nVPzT5r1bAgMBAAECggEAKhb7bpcqdw7NaXkZUVELYuQwUjqvNDNhwT/lee0oYr9U\nf//Q6ZImqfPb9nCCWfhu694y9qIVGUjsQXQfvrdJ6NQnpRDKf6G5ADauG2oEbZ9Y\nIiIn9aSV2ZujD8bMOs8aHOYfgS7+pwPA8rQxpc5LJlHltfUwKbYOC9nv2eur14+k\nqX/B67gQPbzbcp/uds4nkfTpTiZBcyq2nMvZe9SBhCiqk5ikr6PDM1SmO/wZY3eQ\nQ5Text+1ecyjH/7c4AMalRrBOnJ2Fu46SveQVeAoBrxN3GxvQPpgtZQLrkYCFrSl\n/e7kUaWTckq/TTn/L63P3ghLad2WKKKwDcx7c/WzCQKBgQDdadWTV0kUPEEU9+wW\n0pIFsp0yniITxcoqnTHkXtxgb8o+QlHYMHkCUIg6J6wWVt2W5A+tRgpaCTJCvKpX\nH+LcOwcfl3qgtTHuibW53GMHMn47kmLQ4kqY0cmRVJtcus5nX+rpJmiFqoywh6GN\n3Pd4p06VZ11QCrFXNZMOfYpTgwKBgQDMR8lidsT91TkpFUNsf3e/SfwcjEHMHJuC\nnOiU5loS/GNVX5ScOwD2VCkuSwBH+JdyEIyPrsCi356GP5IYmREVXpZoCWobkm+8\nfbSM2M18ZxO2DE+mA9PupHXLq3d4DhbMHVM/aD0S1JRvfIo/vpWvSHPmX/F/ZBx4\nI5wQ4PrPSQKBgQC+ACcN5FZK7hXvV30abKJwD0GEgVy+2PlOrkx1K84zV1sXKDQx\nsA73pIHyXb74AJzw8k5dpAAYGVIvINWQJEW6NVE8k/HgXP03NKdkkjHMqFDY8Bqq\nI7ZeA5DUjOUxowCihxX/8zy4j41ho1JIeblHqVLvNJ9Ho5VhQBEs2yBL3wKBgQC7\ncgOwfhs0b7sLn59Gp5BRzqmv6GNXz8hCiYhBWT29vinH5PSQhvPTFFbVS6zuXYVZ\n/SV9knTg/yCPPzXnrEyotyp8PGdI9Y3h/9b0htvHEy5bFeDgDRMjH3WXdbciSotQ\nsHf67sNbzASIaFbTNyZSuMDg25jVtB8LfmFue4KpQQKBgG2RMnhtG+g8sY382cDu\n0zWATcU+kGca7iNxK69AYbjDr4IMqyiFFruRp1L5Ct8G5WN6ayG9VDBsvoxeTpf\n498rsfVRlrE+xgQJBddtzKZ/TeWqfmpRIFrcdfUQ8CtQSwrvrA40jzZ+bsh+JG1z\nhAh8qjJWXzeeUsLEa+QGiTZV\n-----END PRIVATE KEY-----\n".replace(/\\n/g, '\n'),
+  // ✅ 아래 private_key 부분을 '백틱'(`)으로 감싸고, JSON 파일에 있는 그대로 엔터를 쳐서 넣으세요.
+  // ✅ .replace(/\\n/g, '\n')를 마지막에 붙여서 혹시 모를 깨짐을 방지합니다.
+  private_key: `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCwrmy451kMV90L
+vZJkX2jy3fzXmxU1MZNx7f3Q95Gc8LrqiHz4AefqEblRIen8jZZbujo9ZD1INH78
+RqAqF4pFR2SCftMWR3PegwjdO2Er7q4+XOyKoVKrUzfY38m4FnJFguFVj2X3M49k
+YJW0p37ulC5mxoWaINbmKoNKFSHKQ8NoJv9fSsvxVzzSSQD1hPV/2WsGeSbEkLcp
+7VIVjecCMKeupPYLLvwQS+99FS9VbuG0BByNI2gr22anaeD/+gdUZGp4Mu8Vojqv
+81g8PGzKKxpJ2ucUDtT8nBOrXoBquOyIM87KtTDdWbRxTH9hPkMUVgxpdX3R33Ch
+VPzT5r1bAgMBAAECggEAKhb7bpcqdw7NaXkZUVELYuQwUjqvNDNhwT/lee0oYr9U
+f//Q6ZImqfPb9nCCWfhu694y9qIVGUjsQXQfvrdJ6NQnpRDKf6G5ADauG2oEbZ9Y
+IiIn9aSV2ZujD8bMOs8aHOYfgS7+pwPA8rQxpc5LJlHltfUwKbYOC9nv2eur14+k
+qX/B67gQPbzbcp/uds4nkfTpTiZBcyq2nMvZe9SBhCiqk5ikr6PDM1SmO/wZY3eQ
+Q5Text+1ecyjH/7c4AMalRrBOnJ2Fu46SveQVeAoBrxN3GxvQPpgtZQLrkYCFrSl
+/e7kUaWTckq/TTn/L63P3ghLad2WKKKwDcx7c/WzCQKBgQDdadWTV0kUPEEU9+wW
+0pIFsp0yniITxcoqnTHkXtxgb8o+QlHYMHkCUIg6J6wWVt2W5A+tRgpaCTJCvKpX
+H+LcOwcfl3qgtTHuibW53GMHMn47kmLQ4kqY0cmRVJtcus5nX+rpJmiFqoywh6GN
+3Pd4p06VZ11QCrFXNZMOfYpTgwKBgQDMR8lidsT91TkpFUNsf3e/SfwcjEHMHJuC
+nnOiU5loS/GNVX5ScOwD2VCkuSwBH+JdyEIyPrsCi356GP5IYmREVXpZoCWobkm+8
+fbSM2M18ZxO2DE+mA9PupHXLq3d4DhbMHVM/aD0S1JRvfIo/vpWvSHPmX/F/ZBx4
+I5wQ4PrPSQKBgQC+ACcN5FZK7hXvV30abKJwD0GEgVy+2PlOrkx1K84zV1sXKDQx
+sA73pIHyXb74AJzw8k5dpAAYGVIvINWQJEW6NVE8k/HgXP03NKdkkjHMqFDY8Bqq
+I7ZeA5DUjOUxowCihxX/8zy4j41ho1JIeblHqVLvNJ9Ho5VhQBEs2yBL3wKBgQC7
+cgOwfhs0b7sLn59Gp5BRzqmv6GNXz8hCiYhBWT29vinH5PSQhvPTFFbVS6zuXYVZ
+/SV9knTg/yCPPzXnrEyotyp8PGdI9Y3h/9b0htvHEy5bFeDgDRMjH3WXdbciSotQ
+sHf67sNbzASIaFbTNyZSuMDg25jVtB8LfmFue4KpQQKBgG2RMnhtG+g8sY382cDu
+0zWATcU+kGca7iNxK69AYbjDr4IMqyiFFruRp1L5Ct8G5WN6ayG9VDBsvoxeTpf
+498rsfVRlrE+xgQJBddtzKZ/TeWqfmpRIFrcdfUQ8CtQSwrvrA40jzZ+bsh+JG1z
+hAh8qjJWXzeeUsLEa+QGiTZV
+-----END PRIVATE KEY-----`.replace(/\\n/g, '\n'),
   client_email: "firebase-adminsdk-fbsvc@nighton-f6605.iam.gserviceaccount.com",
   client_id: "113031335639973632043",
   auth_uri: "https://accounts.google.com/o/oauth2/auth",
