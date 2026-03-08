@@ -75,25 +75,37 @@ app.post("/send-call-notification", async (req: Request, res: Response) => {
     }
 
     const message: admin.messaging.Message = {
-        token: targetToken,
-        data: {
-            type: "VOICE_CALL",
-            callerName: String(callerName),
-            callerId: String(callerId || ""),
-            convoId: String(convoId),
-            callerToken: String(callerToken || ""),   // 🔥 추가됨
+  token: targetToken,
+  notification: {
+    title: callerName,
+    body: "전화가 왔습니다",
+  },
+  data: {
+    type: "VOICE_CALL",
+    callerName: String(callerName),
+    callerId: String(callerId || ""),
+    convoId: String(convoId),
+    callerToken: String(callerToken || ""),
+  },
+  android: {
+    priority: "high",
+    notification: {
+      channelId: "default",
+      sound: "default",
+    },
+  },
+  apns: {
+    payload: {
+      aps: {
+        alert: {
+          title: callerName,
+          body: "전화가 왔습니다",
         },
-        android: {
-            priority: "high"
-        },
-        apns: {
-            payload: {
-                aps: {
-                    contentAvailable: true
-                }
-            }
-        }
-    };
+        sound: "default",
+      },
+    },
+  },
+};
 
     try {
         const response = await admin.messaging().send(message);
