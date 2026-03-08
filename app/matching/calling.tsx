@@ -309,22 +309,22 @@ engine.addListener("UserOffline", (uid?: number) => {
 }
 
   // 발신자만 FCM 알림 보내기
-  useEffect(() => {
-    if (params.isReceiver === "true") {
-      console.log("📵 [Calling] 수신자 모드: 알림 전송 스킵");
-      return;
-    }
+ useEffect(() => {
+  if (params.isReceiver === "true") {
+    console.log("📵 [Calling] 수신자 모드: 알림 전송 스킵");
+    return;
+  }
 
-    if (!targetToken) {
-      console.log("⚠️ [Calling] 상대방 토큰 없음");
-      return;
-    }
+  if (!targetToken) {
+    console.log("⚠️ [Calling] 상대방 토큰 없음");
+    return;
+  }
 
-    if (!hasSentNotification.current) {
-      console.log("🚀 [Calling] 발신자 모드: 알림 전송 시작");
-      sendNotification(targetToken);
-    }
-  }, [targetToken]);
+  if (!hasSentNotification.current) {
+    console.log("🚀 [Calling] 발신자 모드: 알림 전송 시작");
+    sendNotification(targetToken);
+  }
+}, []); // ← 빈 배열로 변경
 
   const sendNotification = async (token: string) => {
     try {
@@ -338,6 +338,7 @@ engine.addListener("UserOffline", (uid?: number) => {
           callerName: user?.nickname ?? "User",
           callerId: user?.id,
           convoId: convoId,
+          callerToken: user?.fcmToken,
         }),
       });
 

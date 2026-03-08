@@ -23,6 +23,7 @@ export default function RootLayout() {
           callerName: data.callerName || "상대방",
           convoId: data.convoId,
           callerPhoto: data.callerPhoto,
+          callerToken: data.callerToken, // 🔥 반드시 포함
         });
       }
     });
@@ -42,6 +43,7 @@ export default function RootLayout() {
         callerName: data.callerName || "상대방",
         convoId: data.convoId,
         callerPhoto: data.callerPhoto,
+        callerToken: data.callerToken, // 🔥 반드시 포함
       });
     }
   });
@@ -73,11 +75,13 @@ export default function RootLayout() {
             callerId={incomingCall.callerId}
             convoId={incomingCall.convoId}
             callerPhoto={incomingCall.callerPhoto}
-            onAccept={(callerToken) => {
-              console.log("🚀 [수락] 상대 토큰:", callerToken);
+            callerToken={incomingCall.callerToken}
+            onAccept={() => {
+              console.log("🚀 [수락] 상대 토큰:", incomingCall.callerToken);
 
               const targetId = incomingCall.convoId;
               const targetName = incomingCall.callerName;
+              const callerToken = incomingCall.callerToken;
 
               setIncomingCall(null);
 
