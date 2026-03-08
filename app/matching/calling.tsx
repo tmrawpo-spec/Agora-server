@@ -308,29 +308,29 @@ engine.addListener("UserOffline", (uid?: number) => {
   }
 }
 
-  // 발신자만 FCM 알림 보내기
- useEffect(() => {
-  if (params.isReceiver === "true") {
-    console.log("📵 [Calling] 수신자 모드: 알림 전송 스킵");
-    return;
-  }
+  // ✅ 1. 발신자 전용 FCM 알림 전송 로직 (수정본)
+  useEffect(() => {
+    // 수신자 모드이면 알림을 보낼 필요가 없음
+    if (params.isReceiver === "true") {
+      console.log("📵 [Calling] 수신자 모드: 알림 전송 스킵");
+      return;
+    }
 
-  if (!targetToken) {
-    console.log("⚠️ [Calling] 상대방 토큰 없음");
-    return;
-  }
+    // 핵심 수정: targetToken이 감지될 때까지 기다렸다가, 들어오는 순간 딱 한 번 실행
+    if (targetToken && !hasSentNotification.current) {
+      console.log("🚀 [Calling] 알림 전송 조건 충족! 서버로 요청을 보냅니다.");
+      sendNotification(targetToken);
+    }
+  }, [targetToken]); // 👈 빈 배열 []에서 [targetToken]으로 변경하여 토큰 로딩 대응
 
-  if (!hasSentNotification.current) {
-    console.log("🚀 [Calling] 발신자 모드: 알림 전송 시작");
-    sendNotification(targetToken);
-  }
-}, []); // ← 빈 배열로 변경
-
+  // ✅ 2. 서버로 알림 요청을 보내는 함수
   const sendNotification = async (token: string) => {
     try {
-      hasSentNotification.current = true;
+      // 주소 슬래시(/) 중복 방지 처리된 URL 생성
+      const fullUrl = `${SERVER_URL}/send-call-notification`.replace(/([^:]\/)\/+/g, "$1");
+      console.log("🔗 서버 요청 주소:", fullUrl);
 
-      const response = await fetch(`${SERVER_URL}/send-call-notification`, {
+      const response = await fetch(fullUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -344,10 +344,15 @@ engine.addListener("UserOffline", (uid?: number) => {
 
       const resData = await response.json();
 
-      if (!response.ok || !resData.success) {
+      if (response.ok && resData.success) {
+        hasSentNotification.current = true; // ✅ 전송 성공 시에만 완료 표시
+        console.log("✅ [Calling] 서버 알림 발송 승인 완료");
+      } else {
+        console.log("❌ [Calling] 서버 응답 에러:", resData);
         hasSentNotification.current = false;
       }
     } catch (error) {
+      console.error("🔥 [Calling] 서버 통신 중 네트워크 에러:", error);
       hasSentNotification.current = false;
     }
   };
