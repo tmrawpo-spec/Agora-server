@@ -1,10 +1,14 @@
 import pkg from "agora-token";
 const { RtcTokenBuilder, RtcRole } = pkg;
+
 import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
-import * as admin from "firebase-admin";
 
+import admin from "firebase-admin";
+import { getApps, initializeApp, cert } from "firebase-admin/app";
+
+// Firebase 서비스 계정
 const serviceAccount = {
     type: "service_account",
     project_id: "nighton-f6605",
@@ -18,20 +22,20 @@ const serviceAccount = {
     client_x509_cert_url: "..."
 };
 
+// Firebase 초기화
+if (getApps().length === 0) {
+    initializeApp({
+        credential: cert(serviceAccount as any),
+    });
+    console.log("🔥 Firebase Admin Initialized");
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const APP_ID = "94e90b1837c04de4b4a21aa6caaf8f03";
 const APP_CERTIFICATE = "5857791ccd0a4964b76504694725b88b";
-
-// Firebase 초기화
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount as any),
-    });
-    console.log("🔥 Firebase Admin Initialized");
-}
 
 // Agora 토큰 생성
 app.get("/rtc-token", (req: Request, res: Response) => {
