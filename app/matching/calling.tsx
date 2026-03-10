@@ -25,7 +25,7 @@ import { t, Language } from "@/constants/i18n";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData } from "@/contexts/DataContext";
 
-import RtcEngine from "react-native-agora";
+import { getAgoraEngine, destroyAgoraEngine } from "@/src/services/agoraEngine";
 import { AGORA_APP_ID, SERVER_URL } from "@/constants/agora";
 
 const CALL_DURATION_LIMIT = 7 * 60;
@@ -41,6 +41,14 @@ function formatTime(secs: number) {
   return `${secs < 0 ? "-" : ""}${pad(m)}:${pad(s)}`;
 }
 
+function uidFromString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % 999999 + 1; // 0 방지, 최대 999999
+}
 export default function CallingScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -54,37 +62,23 @@ const isEndingRef = useRef(false); // 중복 종료 방지 플래그
 
 // 안전하게 엔진 정리하는 헬퍼
 async function safeDestroyEngine() {
-  const eng = engineRef.current;
-  if (!eng) return;
+  if (!engineRef.current) return;
 
   try {
-    // 1) 먼저 채널 떠나기 시도 (있으면)
-    if (typeof eng.leaveChannel === "function") {
-      try { await eng.leaveChannel(); } catch (e) { console.log("[Agora] leaveChannel error:", e); }
-      console.log("[Agora] leaveChannel() called");
-    }
-
-    // 2) 가능한 정리 메서드들을 순서대로 시도
-    if (typeof eng.destroy === "function") {
-      try { await eng.destroy(); } catch (e) { console.log("[Agora] destroy error:", e); }
-      console.log("[Agora] engine.destroy() called");
-    } else if (typeof eng.release === "function") {
-      try { await eng.release(); } catch (e) { console.log("[Agora] release error:", e); }
-      console.log("[Agora] engine.release() called");
-    } else if (typeof eng.dispose === "function") {
-      try { await eng.dispose(); } catch (e) { console.log("[Agora] dispose error:", e); }
-      console.log("[Agora] engine.dispose() called");
-    } else if (typeof eng.removeAllListeners === "function") {
-      try { eng.removeAllListeners(); } catch (e) { console.log("[Agora] removeAllListeners error:", e); }
-      console.log("[Agora] engine.removeAllListeners() called");
-    } else {
-      console.log("[Agora] no known destroy/release method found on engine");
-    }
-  } catch (err) {
-    console.log("[Agora] safeDestroyEngine error:", err);
-  } finally {
-    engineRef.current = null;
+    engineRef.current.leaveChannel();
+    console.log("[Agora] leaveChannel() called");
+  } catch (e) {
+    console.log("[Agora] leaveChannel error:", e);
   }
+
+  try {
+    destroyAgoraEngine();
+    console.log("[Agora] engine.release() called");
+  } catch (e) {
+    console.log("[Agora] release error:", e);
+  }
+
+  engineRef.current = null;
 }
 
 
@@ -143,40 +137,20 @@ async function safeDestroyEngine() {
     }
   }
 
-  // v3 방식: 함수 호출 + initialize()
-  console.log("[Agora] calling RtcEngine() to create engine");
-  const engine = await RtcEngine();
-  console.log("[Agora] engine created, calling initialize with appId:", AGORA_APP_ID);
+  const engine = getAgoraEngine();
+  engineRef.current = engine;
 
   await engine.initialize({
-  appId: AGORA_APP_ID,
-  channelProfile: 1, // LiveBroadcasting
-});
+    appId: AGORA_APP_ID,
+    channelProfile: 1, // LiveBroadcasting
+  });
+  console.log("[Agora] engine initialized");
 
-console.log("[Agora] engine initialized");
+  engine.setClientRole(1); // Broadcaster
+  engine.enableAudio();
+  engine.setEnableSpeakerphone(true);
 
-// 오디오 활성화 (publish/subscribe 위해 필요)
-try {
-  if (typeof engine.enableAudio === "function") {
-    engine.enableAudio();
-    console.log("[Agora] enableAudio() called");
-  }
-} catch (e) {
-  console.log("[Agora] enableAudio error:", e);
-}
-
-// LiveBroadcasting 모드에서는 역할 설정이 중요함 (1 = Broadcaster)
-try {
-  if (typeof engine.setClientRole === "function") {
-    engine.setClientRole(1); // Broadcaster
-    console.log("[Agora] setClientRole(1) called");
-  }
-} catch (e) {
-  console.log("[Agora] setClientRole error:", e);
-}
-
-engineRef.current = engine;
-
+  // 이벤트 등록 먼저, 그 다음 채널 입장
   registerAgoraEvents(engine);
   await joinAgoraChannel();
 }
@@ -196,33 +170,22 @@ engineRef.current = engine;
   // 서버에서 토큰 받아오기 + joinChannel
   async function joinAgoraChannel() {
   try {
-    // **검증 로그: 토큰 요청 직전 채널명 출력**
-    console.log("🔑 Agora 토큰 요청 (channelName):", convoId, "localUserId:", user?.id);
+    const uid = user?.id ? uidFromString(user.id) : Math.floor(Math.random() * 999999) + 1;
+    console.log("🔑 Agora 토큰 요청 (channelName):", convoId, "localUserId:", user?.id, "→ uid:", uid);
 
-    // uid는 반드시 서버와 동일하게 사용해야 함
-const uid = Number(user?.id) || Math.floor(Math.random() * 1000000);
+    const res = await fetch(`${SERVER_URL}/rtc-token?channelName=${convoId}&uid=${uid}`);
+    const { token } = await res.json();
+    console.log("🔑 토큰 수신 완료, tokenExists:", !!token, "uid:", uid);
 
-// 서버에 uid를 함께 전달해야 Agora가 두 사용자를 같은 채널 멤버로 인식함
-const res = await fetch(
-  `${SERVER_URL}/rtc-token?channelName=${convoId}&uid=${uid}`
-);
-const { token } = await res.json();
+    localUidRef.current = uid;
 
-console.log("🔑 Received token from server for channel:", convoId, "tokenExists:", !!token);
-console.log("🔑 Now joining Agora channel:", convoId, "with uid:", uid);
+    // v4 API: joinChannel(token, channelName, uid, options)
+    await engineRef.current?.joinChannel(token, convoId, uid, {});
+    console.log("📡 채널 입장 완료, channel:", convoId, "uid:", uid);
 
-// 로컬 uid 저장
-localUidRef.current = uid;
-
-// joinChannel 호출 (v3 API)
-await engineRef.current?.joinChannel(token, convoId, null, uid);
-
-console.log("📡 Agora 채널 입장 완료, channel:", convoId, "uid:", uid);
-console.log("[Debug] engineRef.current exists:", !!engineRef.current, "localUidRef:", localUidRef.current);
-
-// join 직후 추가 검증 로그
-console.log("📡 Agora 채널 입장 완료, channel:", convoId, "uid:", uid);
-console.log("[Debug] engineRef.current exists:", !!engineRef.current, "localUidRef:", localUidRef.current);
+    engineRef.current?.muteLocalAudioStream(false);
+    engineRef.current?.enableLocalAudio(true);
+    console.log("[Agora] local audio enabled");
   } catch (e) {
     console.log("❌ Agora 채널 입장 실패:", e);
   }
@@ -232,80 +195,44 @@ console.log("[Debug] engineRef.current exists:", !!engineRef.current, "localUidR
   function registerAgoraEvents(engine: any) {
   console.log("[Agora] registerAgoraEvents called");
 
-  // 채널 입장 성공
-  try {
-    engine.addListener("JoinChannelSuccess", (channel: string, uid: number, elapsed: number) => {
-      console.log("[Agora Event] JoinChannelSuccess channel:", channel, "uid:", uid, "elapsed:", elapsed);
-    });
-  } catch (e) {
-    console.log("[Agora] JoinChannelSuccess listener not available:", e);
-  }
+  engine.registerEventHandler({
+    onJoinChannelSuccess(connection: any, elapsed: number) {
+      console.log("[Agora Event] onJoinChannelSuccess uid:", connection?.localUid, "elapsed:", elapsed);
+      if (connection?.localUid) {
+        localUidRef.current = connection.localUid;
+      }
+    },
 
-  // 원격 유저 입장
-  // 원격 유저 입장
-engine.addListener("UserJoined", (uid: number) => {
-  console.log("[Agora Event] UserJoined uid:", uid, "localUid:", localUidRef.current);
+    onUserJoined(connection: any, remoteUid: number, elapsed: number) {
+      console.log("[Agora Event] onUserJoined remoteUid:", remoteUid, "localUid:", localUidRef.current);
 
-  // 자기 자신이 들어온 이벤트면 무시 (중요!)
-  if (localUidRef.current && uid === localUidRef.current) {
-    console.log("[Agora] UserJoined for local uid — ignoring");
-    return;
-  }
+      if (remoteUid === localUidRef.current) {
+        console.log("[Agora] 자기 자신 uid — 무시");
+        return;
+      }
 
-  // 진짜 상대방이 들어온 경우만 active 전환
-  setCallState("active");
-  startTimer();
-});
+      console.log("✅ 상대방 입장 확인! 통화 시작");
+      setCallState("active");
+      startTimer();
+    },
 
-// 원격 유저 퇴장
-engine.addListener("UserOffline", (uid?: number) => {
-  console.log("[Agora Event] UserOffline uid:", uid, "localUid:", localUidRef.current);
+    onUserOffline(connection: any, remoteUid: number, reason: number) {
+      console.log("[Agora Event] onUserOffline remoteUid:", remoteUid, "reason:", reason);
 
-  if (uid == null) {
-    console.log("[Agora] UserOffline with undefined uid — ignoring");
-    return;
-  }
+      if (remoteUid === localUidRef.current) return;
 
-  // 자기 자신이면 무시 (중요!)
-  if (localUidRef.current && uid === localUidRef.current) {
-    console.log("[Agora] UserOffline for local uid — ignoring");
-    return;
-  }
+      console.log("📴 상대방 퇴장 — 통화 종료");
+      handleEndCall();
+    },
 
-  // 진짜 상대방이 나간 경우만 종료
-  handleEndCall();
-});
+    onLeaveChannel(connection: any, stats: any) {
+      console.log("[Agora Event] onLeaveChannel stats:", stats);
+    },
 
-  // 채널 떠남 이벤트
-  try {
-    engine.addListener("LeaveChannel", (stats: any) => {
-      console.log("[Agora Event] LeaveChannel", stats);
-    });
-  } catch (e) {
-    console.log("[Agora] LeaveChannel listener not available:", e);
-  }
-
-  // 원격 오디오/비디오 상태 변화(선택적, 디버깅용)
-  try {
-    engine.addListener("RemoteAudioStateChanged", (uid: number, state: number, reason: number, elapsed: number) => {
-      console.log("[Agora Event] RemoteAudioStateChanged uid:", uid, "state:", state, "reason:", reason);
-    });
-  } catch (e) {}
-
-  try {
-    engine.addListener("RemoteVideoStateChanged", (uid: number, state: number, reason: number, elapsed: number) => {
-      console.log("[Agora Event] RemoteVideoStateChanged uid:", uid, "state:", state, "reason:", reason);
-    });
-  } catch (e) {}
-
-  // 에러 이벤트
-  try {
-    engine.addListener("Error", (err: any) => {
-      console.log("[Agora Event] Error:", err);
-    });
-  } catch (e) {
-    console.log("[Agora] Error listener not available:", e);
-  }
+    onError(err: number, msg: string) {
+      console.log("[Agora Event] onError:", err, msg);
+    },
+  });
 }
 
   // ✅ 1. 발신자 전용 FCM 알림 전송 로직 (수정본)

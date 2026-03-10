@@ -42,10 +42,10 @@ app.get("/rtc-token", (req: Request, res: Response) => {
     const channelName = req.query.channelName as string;
     const uid = Number(req.query.uid);
 
-    if (!channelName) return res.status(400).json({ error: "channelName is required" });
-    if (uid === undefined || isNaN(uid)) {
-        return res.status(400).json({ error: "uid is required" });
-    }
+if (!channelName) return res.status(400).json({ error: "channelName is required" });
+if (isNaN(uid)) {
+  return res.status(400).json({ error: "uid must be a valid number" });
+}
 
     const role = RtcRole.PUBLISHER;
     const expiration = Math.floor(Date.now() / 1000) + 3600;
