@@ -11,7 +11,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Language } from "@/constants/i18n";
 import { Gender } from "./AuthContext";
 
-// ✅ Firebase 임포트
 import { db } from "@/constants/firebase";
 import { 
   collection, 
@@ -24,9 +23,11 @@ import {
   arrayUnion, 
   increment,
   getDoc,
+  setDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 
-export interface FakeProfile {
+export interface UserProfile {
   id: string;
   nickname: string;
   gender: Gender;
@@ -37,11 +38,10 @@ export interface FakeProfile {
   profilePhoto?: string;
   voiceIntroUrl?: string;
   isOnline: boolean;
-  // ✅ 필드명 주의: DB 저장명과 일치시켜야 함 (fcmToken 추천)
   fcmToken?: string; 
 }
 
-export interface Visitor extends FakeProfile {
+export interface Visitor extends UserProfile {
   visitedAt: number;
 }
 
@@ -50,12 +50,21 @@ export interface Message {
   senderId: string;
   text: string;
   createdAt: number;
+  type?: "text" | "call" | "missed_call";
+}
+
+// ✅ Match History 인터페이스 추가
+export interface MatchHistory {
+  id: string;
+  profile: UserProfile;
+  matchedAt: number;
+  isUnlocked: boolean;
 }
 
 export interface Conversation {
   id: string;
   matchedUserId: string;
-  matchedUser: FakeProfile;
+  matchedUser: UserProfile;
   messages: Message[];
   createdAt: number;
   lastMessage?: string;
@@ -96,11 +105,13 @@ interface DataContextValue {
   conversations: Conversation[];
   posts: Post[];
   visitors: Visitor[];
+  matchHistories: MatchHistory[]; // ✅ 추가
   addConversation: (
-    matchedUser: FakeProfile, 
-    options?: { messageUnlocked?: boolean; voiceUnlocked?: boolean; isFriend?: boolean }
+    matchedUser: UserProfile, 
+    options?: { messageUnlocked?: boolean; voiceUnlocked?: boolean; isFriend?: boolean; myUserId?: string }
   ) => Promise<Conversation>;
-  sendMessage: (conversationId: string, senderId: string, text: string) => Promise<void>;
+  sendMessage: (conversationId: string, senderId: string, text: string, type?: "text" | "call" | "missed_call") => Promise<void>;
+  subscribeToMessages: (conversationId: string, callback: (messages: Message[]) => void) => () => void;
   unlockVoice: (conversationId: string) => Promise<void>;
   blockFriend: (conversationId: string) => Promise<void>;
   unblockFriend: (conversationId: string) => Promise<void>;
@@ -108,29 +119,38 @@ interface DataContextValue {
   addPost: (post: Omit<Post, "id" | "comments" | "likes" | "createdAt" | "likedBy" | "commentedBy" | "isPopular">) => Promise<void>;
   addComment: (postId: string, comment: Omit<PostComment, "id" | "createdAt">) => Promise<void>;
   likePost: (postId: string, userId: string) => Promise<void>;
-  recordVisit: (visitorProfile: FakeProfile, myGender?: Gender) => Promise<void>;
+  recordVisit: (visitorProfile: UserProfile, myGender?: Gender) => Promise<void>;
   refreshConversations: () => Promise<void>;
   refreshPosts: () => Promise<void>;
   refreshVisitors: () => Promise<void>;
+  addMatchHistory: (profile: UserProfile) => Promise<void>; // ✅ 추가
+  unlockMatchHistory: (id: string) => Promise<boolean>; // ✅ 추가
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
 
 const CONVOS_KEY = "@nighton_conversations";
 const VISITORS_KEY = "@nighton_visitors";
+const MATCH_HISTORY_KEY = "@nighton_match_histories"; // ✅ 추가
 
 function makeId() {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+}
+
+function makeConvoId(userIdA: string, userIdB: string): string {
+  return [userIdA, userIdB].sort().join("_");
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [visitors, setVisitors] = useState<Visitor[]>([]);
+  const [matchHistories, setMatchHistories] = useState<MatchHistory[]>([]); // ✅ 추가
 
   useEffect(() => {
     refreshConversations();
     refreshVisitors();
+    refreshMatchHistories(); // ✅ 추가
 
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -139,9 +159,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         ...doc.data()
       })) as Post[];
 
-      if (fetchedPosts.length === 0) {
-        // 초기 데이터 로딩 생략 가능 (필요시 호출)
-      } else {
+      if (fetchedPosts.length > 0) {
         setPosts(fetchedPosts);
       }
     }, (error) => {
@@ -151,7 +169,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // ✅ [수정] 대화 목록을 불러올 때 상대방의 FCM 토큰을 확실히 가져옴
   async function refreshConversations() {
     try {
       const stored = await AsyncStorage.getItem(CONVOS_KEY);
@@ -170,7 +187,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
               ...convo,
               matchedUser: {
                 ...convo.matchedUser,
-                // DB 필드가 fcmToken이든 TargetToken이든 둘 다 대응하도록 수정
                 fcmToken: firestoreData.fcmToken || firestoreData.TargetToken || convo.matchedUser.fcmToken,
                 isOnline: firestoreData.isOnline ?? convo.matchedUser.isOnline,
                 profilePhoto: firestoreData.profilePhoto || convo.matchedUser.profilePhoto,
@@ -193,10 +209,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }
 
   async function refreshPosts() {}
+
   async function refreshVisitors() {
     try {
       const stored = await AsyncStorage.getItem(VISITORS_KEY);
       if (stored) setVisitors(JSON.parse(stored));
+    } catch (e) { console.error(e); }
+  }
+
+  // ✅ match history 로드
+  async function refreshMatchHistories() {
+    try {
+      const stored = await AsyncStorage.getItem(MATCH_HISTORY_KEY);
+      if (stored) setMatchHistories(JSON.parse(stored));
     } catch (e) { console.error(e); }
   }
 
@@ -210,10 +235,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setVisitors(v);
   }
 
-  // ✅ [수정] 대화 시작 시 상대방의 최신 토큰을 다시 한번 강제로 긁어옴
   async function addConversation(
-    matchedUser: FakeProfile,
-    options?: { messageUnlocked?: boolean; voiceUnlocked?: boolean; isFriend?: boolean }
+    matchedUser: UserProfile,
+    options?: { messageUnlocked?: boolean; voiceUnlocked?: boolean; isFriend?: boolean; myUserId?: string }
   ): Promise<Conversation> {
 
     let latestFCMToken = matchedUser.fcmToken;
@@ -222,8 +246,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const userSnap = await getDoc(userRef);
       if (userSnap.exists()) {
         const data = userSnap.data();
-        latestFCMToken = data.fcmToken || data.TargetToken; // 두 필드 모두 체크
-        console.log("📡 [DataContext] 상대방 최신 토큰 확인됨:", !!latestFCMToken);
+        latestFCMToken = data.fcmToken || data.TargetToken;
       }
     } catch (err) {
       console.warn("최신 토큰 조회 실패", err);
@@ -248,8 +271,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       return updated.find(u => u.id === existing.id)!;
     }
 
+    const convoId = options?.myUserId 
+      ? makeConvoId(options.myUserId, matchedUser.id)
+      : makeId();
+
     const convo: Conversation = { 
-      id: makeId(), 
+      id: convoId, 
       matchedUserId: matchedUser.id, 
       matchedUser: updatedMatchedUser, 
       messages: [], 
@@ -264,13 +291,75 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return convo;
   }
 
-  async function sendMessage(conversationId: string, senderId: string, text: string) {
-    const msg: Message = { id: makeId(), senderId, text, createdAt: Date.now() };
+  async function sendMessage(
+    conversationId: string, 
+    senderId: string, 
+    text: string,
+    type: "text" | "call" | "missed_call" = "text"
+  ) {
+    const msg: Message = { 
+      id: makeId(), 
+      senderId, 
+      text, 
+      createdAt: Date.now(),
+      type,
+    };
+
+    try {
+      await addDoc(collection(db, "chats", conversationId, "messages"), msg);
+      await setDoc(doc(db, "chats", conversationId), {
+        lastMessage: text,
+        lastUpdated: Date.now(),
+        conversationId,
+      }, { merge: true });
+    } catch (e) {
+      console.error("Firestore 메시지 저장 실패:", e);
+    }
+
     const updated = conversations.map((c) => {
       if (c.id !== conversationId) return c;
       return { ...c, messages: [...c.messages, msg], lastMessage: text, isMessageUnlocked: true };
     });
     await saveConversations(updated);
+  }
+
+  // ✅ match history 추가
+  async function addMatchHistory(profile: UserProfile) {
+    try {
+      const stored = await AsyncStorage.getItem(MATCH_HISTORY_KEY);
+      const current: MatchHistory[] = stored ? JSON.parse(stored) : [];
+      
+      // 중복 방지
+      const exists = current.find(h => h.profile.id === profile.id);
+      if (exists) return;
+
+      const newEntry: MatchHistory = {
+        id: makeId(),
+        profile,
+        matchedAt: Date.now(),
+        isUnlocked: false,
+      };
+      const updated = [newEntry, ...current];
+      await AsyncStorage.setItem(MATCH_HISTORY_KEY, JSON.stringify(updated));
+      setMatchHistories(updated);
+    } catch (e) {
+      console.error("match history 저장 실패:", e);
+    }
+  }
+
+  // ✅ match history unlock
+  async function unlockMatchHistory(id: string): Promise<boolean> {
+    try {
+      const stored = await AsyncStorage.getItem(MATCH_HISTORY_KEY);
+      const current: MatchHistory[] = stored ? JSON.parse(stored) : [];
+      const updated = current.map(h => h.id === id ? { ...h, isUnlocked: true } : h);
+      await AsyncStorage.setItem(MATCH_HISTORY_KEY, JSON.stringify(updated));
+      setMatchHistories(updated);
+      return true;
+    } catch (e) {
+      console.error("match history unlock 실패:", e);
+      return false;
+    }
   }
 
   async function unlockVoice(conversationId: string) {
@@ -295,13 +384,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await saveConversations(updated);
   }
 
-  async function recordVisit(visitorProfile: FakeProfile, myGender?: Gender) {
+  async function recordVisit(visitorProfile: UserProfile, myGender?: Gender) {
     try {
       const filtered = visitors.filter((v) => v.id !== visitorProfile.id);
-      const newVisitor: Visitor = {
-        ...visitorProfile,
-        visitedAt: Date.now(),
-      };
+      const newVisitor: Visitor = { ...visitorProfile, visitedAt: Date.now() };
       const updated = [newVisitor, ...filtered];
       await saveVisitors(updated);
     } catch (e) { console.error("Visit record error", e); }
@@ -334,11 +420,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   async function addComment(postId: string, comment: Omit<PostComment, "id" | "createdAt">) {
     try {
       const postRef = doc(db, "posts", postId);
-      const newComment: PostComment = {
-        ...comment,
-        id: makeId(),
-        createdAt: Date.now()
-      };
+      const newComment: PostComment = { ...comment, id: makeId(), createdAt: Date.now() };
       await updateDoc(postRef, {
         comments: arrayUnion(newComment),
         commentedBy: arrayUnion(comment.userId)
@@ -366,13 +448,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  function subscribeToMessages(conversationId: string, callback: (messages: Message[]) => void) {
+    const q = query(
+      collection(db, "chats", conversationId, "messages"),
+      orderBy("createdAt", "asc")
+    );
+    return onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
+      callback(msgs);
+    });
+  }
+
   const value = useMemo(() => ({
-    conversations, posts, visitors,
+    conversations, posts, visitors, matchHistories,
     addConversation, sendMessage, unlockVoice,
     blockFriend, unblockFriend, removeFriend,
     addPost, addComment, likePost, recordVisit,
     refreshConversations, refreshPosts, refreshVisitors,
-  }), [conversations, posts, visitors]);
+    subscribeToMessages,
+    addMatchHistory, unlockMatchHistory, // ✅ 추가
+  }), [conversations, posts, visitors, matchHistories]);
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }

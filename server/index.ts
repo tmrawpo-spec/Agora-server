@@ -115,5 +115,52 @@ app.post("/send-call-notification", async (req: Request, res: Response) => {
     }
 });
 
+// 💬 채팅 메시지 알림
+app.post("/send-message-notification", async (req: Request, res: Response) => {
+  const { targetToken, senderName, message, convoId } = req.body;
+
+  if (!targetToken) {
+    return res.status(400).json({ error: "targetToken is required" });
+  }
+
+  const fcmMessage: admin.messaging.Message = {
+    token: targetToken,
+    notification: {
+      title: senderName,
+      body: message,
+    },
+    data: {
+      type: "CHAT_MESSAGE",
+      convoId: String(convoId),
+      senderName: String(senderName),
+    },
+    android: {
+      priority: "high",
+      notification: {
+        channelId: "default",
+        sound: "default",
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          alert: {
+            title: senderName,
+            body: message,
+          },
+          sound: "default",
+        },
+      },
+    },
+  };
+
+  try {
+    const response = await admin.messaging().send(fcmMessage);
+    res.json({ success: true, messageId: response });
+  } catch (error: any) {
+    res.status(500).json({ error: "FCM Send Failed", details: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

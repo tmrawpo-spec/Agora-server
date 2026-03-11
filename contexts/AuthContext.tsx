@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
-import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { 
   createUserWithEmailAndPassword, 
@@ -12,14 +11,15 @@ import {
   onAuthStateChanged
 } from "firebase/auth";
 import { doc, setDoc, onSnapshot, updateDoc, getDoc } from "firebase/firestore";
-import * as Google from "expo-auth-session/providers/google";
-import * as WebBrowser from "expo-web-browser";
+import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
 import { auth, db } from "../constants/firebase"; 
 import { Language } from "../constants/i18n";
 import { router } from "expo-router";
 import messaging from '@react-native-firebase/messaging';
 
-WebBrowser.maybeCompleteAuthSession();
+GoogleSignin.configure({
+  webClientId: "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
+});
 
 export type Gender = "male" | "female";
 export interface UserProfile {
@@ -37,6 +37,8 @@ export interface UserProfile {
   blockedUsers: string[];
   createdAt: number;
   fcmToken?: string;
+  matchDistance?: number;
+  isFirstPurchase?: boolean;
 }
 
 interface AuthContextValue {
@@ -59,19 +61,19 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const USER_KEY = "@nighton_user";
+const SESSION_KEY = "@nighton_session_uid";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCacheLoaded, setIsCacheLoaded] = useState(false);
 
-  // 📱 FCM 토큰 획득 함수 (독립적으로 분리)
   async function getFCMToken() {
     try {
       const authStatus = await messaging().requestPermission();
       const enabled = 
         authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
         authStatus === messaging.AuthorizationStatus.PROVISIONAL;
-
       if (!enabled) return null;
       return await messaging().getToken();
     } catch (error) {
@@ -80,7 +82,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // 📱 기존 유저나 로그인 시 토큰을 업데이트하는 함수
   async function refreshFCMToken(uid: string) {
     try {
       const token = await getFCMToken();
@@ -100,108 +101,152 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     console.log("🔐 [AuthContext] 인증 리스너 가동 중...");
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (fbUser) => {
-      if (fbUser) {
-        console.log("👤 [AuthContext] 유저 감지됨 UID:", fbUser.uid);
+    // 1. 캐시 먼저 로드 (빠른 UI 표시용)
+    AsyncStorage.getItem(USER_KEY).then((cached) => {
+      if (cached) {
+        try {
+          const cachedUser = JSON.parse(cached) as UserProfile;
+          console.log("💾 캐시된 유저 로드:", cachedUser.nickname);
+          setUser(cachedUser);
+        } catch (e) {
+          console.log("⚠️ 캐시 파싱 실패:", e);
+        }
+      }
+      setIsCacheLoaded(true);
+    });
 
-        // 로그인된 상태라면 토큰 최신화 시도
-        refreshFCMToken(fbUser.uid);
+    let unsubscribeSnapshot: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (fbUser) => {
+      console.log("🔄 Auth 상태 변경:", fbUser ? fbUser.uid : "없음");
+
+      // 기존 스냅샷 구독 정리
+      if (unsubscribeSnapshot) {
+        unsubscribeSnapshot();
+        unsubscribeSnapshot = null;
+      }
+
+      if (fbUser) {
+        // 세션 UID 저장 (로그인 유지 확인용)
+        await AsyncStorage.setItem(SESSION_KEY, fbUser.uid);
+
+        // FCM 토큰 갱신 (백그라운드)
+        refreshFCMToken(fbUser.uid).catch(console.error);
 
         const userRef = doc(db, "users", fbUser.uid);
-        const unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const userData = docSnap.data() as UserProfile;
-            console.log("✅ 유저 프로필 로드 완료:", userData.nickname || "신규유저");
-            setUser(userData);
-            AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
-          } else {
-            setUser(null);
-          }
-          setIsLoading(false);
-        }, (error) => {
-          console.error("❌ Firestore 스냅샷 에러:", error);
-          setIsLoading(false);
-        });
 
-        return () => unsubscribeSnapshot();
+        // 먼저 getDoc으로 즉시 데이터 가져오기 (onSnapshot 연결 전)
+        try {
+          const snap = await getDoc(userRef);
+          if (snap.exists()) {
+            const userData = { id: snap.id, ...snap.data() } as UserProfile;
+            setUser(userData);
+            await AsyncStorage.setItem(USER_KEY, JSON.stringify(userData));
+          }
+        } catch (e) {
+          console.log("⚠️ 초기 프로필 로드 실패, 캐시 사용");
+        }
+
+        // 실시간 구독
+        unsubscribeSnapshot = onSnapshot(
+          userRef,
+          { includeMetadataChanges: false },
+          (docSnap) => {
+            if (docSnap.exists()) {
+              const userData = { id: docSnap.id, ...docSnap.data() } as UserProfile;
+              console.log("✅ 유저 프로필 업데이트:", userData.nickname || "신규유저");
+              setUser(userData);
+              AsyncStorage.setItem(USER_KEY, JSON.stringify(userData)).catch(console.error);
+            } else {
+              console.log("⚠️ Firestore에 유저 문서 없음");
+            }
+            setIsLoading(false);
+          },
+          (error) => {
+            console.error("❌ Firestore 스냅샷 에러:", error);
+            // 에러 시 캐시된 유저 유지 (로그아웃 안 시킴)
+            setIsLoading(false);
+          }
+        );
+
+        setIsLoading(false);
+
       } else {
         console.log("🔓 로그인된 유저 없음");
+
+        // 세션 확인: AsyncStorage에 UID가 있으면 Firebase 재연결 대기
+        const savedUid = await AsyncStorage.getItem(SESSION_KEY);
+        if (savedUid) {
+          console.log("💾 세션 UID 있음, 캐시 유지 중...");
+          // 캐시된 유저 유지하고 로딩만 해제 (강제 로그아웃 안 함)
+          setIsLoading(false);
+          return;
+        }
+
         setUser(null);
+        await AsyncStorage.removeItem(USER_KEY);
         setIsLoading(false);
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeSnapshot) unsubscribeSnapshot();
+    };
   }, []);
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
-    iosClientId: "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
-    androidClientId: "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
-  });
 
   async function loginWithGoogle() {
     try {
-      const result = await promptAsync();
-      if (result?.type === "success") {
-        const { id_token } = result.params;
-        const credential = GoogleAuthProvider.credential(id_token);
-        const userCredential = await signInWithCredential(auth, credential);
-        
-        if (userCredential.user) {
-          const fcmToken = await getFCMToken();
-          const userRef = doc(db, "users", userCredential.user.uid);
-          const snap = await getDoc(userRef);
-          
-          if (!snap.exists()) {
-            const newUser: UserProfile = {
-              id: userCredential.user.uid,
-              nickname: "", bio: "", gender: "male", age: 25, language: "en", location: "",
-              coins: 0, blockedUsers: [], createdAt: Date.now(),
-              fcmToken: fcmToken || "", // 구글 최초 가입 시에도 토큰 포함
-            };
-            await setDoc(userRef, newUser);
-          } else if (fcmToken) {
-            await setDoc(userRef, { fcmToken }, { merge: true });
-          }
-          router.replace("/(tabs)");
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken;
+      if (!idToken) throw new Error("ID token 없음");
+
+      const credential = GoogleAuthProvider.credential(idToken);
+      const userCredential = await signInWithCredential(auth, credential);
+
+      if (userCredential.user) {
+        const fcmToken = await getFCMToken();
+        const userRef = doc(db, "users", userCredential.user.uid);
+        const snap = await getDoc(userRef);
+
+        if (!snap.exists()) {
+          const newUser: UserProfile = {
+            id: userCredential.user.uid,
+            nickname: "", bio: "", gender: "male", age: 25, language: "en", location: "",
+            coins: 0, blockedUsers: [], createdAt: Date.now(),
+            fcmToken: fcmToken || "",
+          };
+          await setDoc(userRef, newUser);
+        } else if (fcmToken) {
+          await setDoc(userRef, { fcmToken }, { merge: true });
         }
+        router.replace("/(tabs)");
       }
-    } catch (error) { 
-      console.error("❌ 구글 로그인 에러:", error);
-      throw error; 
+    } catch (error: any) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        console.log("구글 로그인 취소");
+      } else {
+        console.error("❌ 구글 로그인 에러:", error);
+        throw error;
+      }
     }
   }
 
-  // ✅ [수정 완료] 회원가입 시 토큰을 먼저 따고 문서를 생성함
   async function signUp(email: string, pass: string) {
     try {
-      // 1. Auth 계정 생성
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const fbUser = userCredential.user;
-
-      // 2. 즉시 FCM 토큰 획득 시도
       const fcmToken = await getFCMToken();
-      console.log("📱 회원가입 중 FCM 토큰 획득:", fcmToken ? "성공" : "실패");
 
-      // 3. 유저 데이터 객체 구성 (토큰 포함)
       const newUser: UserProfile = {
         id: fbUser.uid,
-        nickname: "", 
-        bio: "", 
-        gender: "male", 
-        age: 25, 
-        language: "en", 
-        location: "",
-        coins: 0, 
-        blockedUsers: [], 
-        createdAt: Date.now(),
-        fcmToken: fcmToken || "", // 여기에 토큰이 박힘
+        nickname: "", bio: "", gender: "male", age: 25, language: "en", location: "",
+        coins: 0, blockedUsers: [], createdAt: Date.now(),
+        fcmToken: fcmToken || "",
       };
 
-      // 4. Firestore에 문서 생성
       await setDoc(doc(db, "users", fbUser.uid), newUser);
-      
       await sendEmailVerification(fbUser);
       router.replace("/(auth)/verify-email");
     } catch (e) { 
@@ -217,7 +262,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         router.replace("/(auth)/verify-email");
         return;
       }
-      // 로그인 시에도 토큰 갱신
       refreshFCMToken(fbUser.uid);
       router.replace("/(tabs)");
     } catch (e) { throw e; }
@@ -232,12 +276,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
+    try {
+      await GoogleSignin.signOut();
+    } catch (e) {
+      console.log("구글 로그아웃 스킵:", e);
+    }
     if (user) {
       const userRef = doc(db, "users", user.id);
       await setDoc(userRef, { fcmToken: null }, { merge: true });
     }
     await signOut(auth);
     await AsyncStorage.removeItem(USER_KEY);
+    await AsyncStorage.removeItem(SESSION_KEY);
     setUser(null);
     router.replace("/(auth)/welcome");
   }
@@ -250,7 +300,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         Object.entries(updates).filter(([_, value]) => value !== undefined)
       );
       await setDoc(userRef, cleanUpdates, { merge: true });
-      console.log("✅ 프로필 업데이트 성공");
     } catch (error) {
       console.error("❌ 업데이트 실패:", error);
     }
@@ -259,7 +308,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function addCoins(amount: number) { 
     if (!user) return; 
     const userRef = doc(db, "users", user.id);
-    await updateDoc(userRef, { coins: (user.coins || 0) + amount }); 
+    await updateDoc(userRef, { 
+      coins: (user.coins || 0) + amount,
+      isFirstPurchase: false,
+    }); 
   }
 
   async function spendCoins(amount: number): Promise<boolean> {
@@ -290,17 +342,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.replace("/(auth)/welcome");
   }
 
+  const computedIsLoading = isLoading || !isCacheLoaded;
   const isAuthenticated = user !== null;
+
   const isProfileComplete = useMemo(() => {
     if (!user) return false;
     return !!(user.nickname && user.nickname.trim().length > 0);
   }, [user]);
 
   const value = useMemo(() => ({
-    user, isLoading, isAuthenticated, isProfileComplete,
-    loginWithGoogle, signUp, signIn, checkEmailVerified, logout, deleteAccount,
-    updateProfile, addCoins, spendCoins, blockUser, unblockUser,
-  }), [user, isLoading, isProfileComplete]);
+    user,
+    isLoading: computedIsLoading,
+    isAuthenticated,
+    isProfileComplete,
+    loginWithGoogle,
+    signUp,
+    signIn,
+    checkEmailVerified,
+    logout,
+    deleteAccount,
+    updateProfile,
+    addCoins,
+    spendCoins,
+    blockUser,
+    unblockUser,
+  }), [user, computedIsLoading, isProfileComplete]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

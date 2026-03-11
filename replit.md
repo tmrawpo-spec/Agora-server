@@ -5,13 +5,13 @@
 NightOn is a mobile social/dating app built with Expo (React Native) that lets users discover nearby people, match with strangers via simulated voice calls, chat with matches, and post to a community board. The app targets iOS and Android (portrait-only) with a dark, nightlife-inspired aesthetic.
 
 Core features:
-- **Discover** — browse opposite-gender profiles filtered by language; shows age + distance in km (never city names); coin-gated calling (20 coins) and messaging (5 coins)
+- **Discover** — browse opposite-gender profiles filtered by language; shows age + distance in km (never city names); coin-gated calling (20 seeds) and messaging (5 seeds)
 - **Match** — random opposite-gender matching; simulated 7-min call, then heart/X decision; mutual heart = friends
 - **Friends** — list of matched friends with chat + block buttons; Blocked sub-tab with unblock option; conversations navigated to `/chat/[id]`
 - **Board** — community posts filtered by user language; Popular (sorted by likes, gold #1 rank badge) and Latest (newest first) sub-tabs; photo posts + comments
-- **Profile** — photo, nickname (50 coins to change), bio (free), age, gender, location, language
-- **App Settings modal** — language switcher + delete account; profile edit modal (nickname costs 50 coins, bio is free)
-- **Coin economy** — 0 coins on signup; CoinShop modal (5 packages: 50/$0.99 to 2000/$19.99, simulated); coin chip in Discover header opens shop
+- **Profile** — photo, nickname (50 seeds to change), bio (free), age, gender, location, language
+- **App Settings modal** — language switcher + delete account; profile edit modal (nickname costs 50 seeds, bio is free)
+- **Coin economy** — 0 seeds on signup; seedshop modal (5 packages: 50/$0.99 to 2000/$19.99, simulated); coin chip in Discover header opens shop
 - **Multilingual** — English, Korean, Japanese, Spanish (i18n via `constants/i18n.ts`)
 
 All user data and social content are **client-side only** (AsyncStorage); the backend is a mostly empty Express scaffold ready to be wired up.
@@ -41,7 +41,7 @@ Preferred communication style: Simple, everyday language.
   - `/matching/decision` — post-call keep/goodbye screen
 - **Tab bar**: Uses `expo-glass-effect` / `NativeTabs` on iOS with Liquid Glass when available; falls back to standard `expo-router` `Tabs` on Android/Web with `BlurView` background on iOS.
 - **State management**:
-  - `AuthContext` — user profile, auth state, coins, block list; persisted to `AsyncStorage` (`@nighton_user`)
+  - `AuthContext` — user profile, auth state, seeds, block list; persisted to `AsyncStorage` (`@nighton_user`)
   - `DataContext` — conversations, posts, fake profiles; persisted to `AsyncStorage`
   - `@tanstack/react-query` — set up for API calls but not heavily used yet (all data is local)
 - **Styling**: All custom `StyleSheet`-based styles; dark theme via `constants/colors.ts` (charcoal palette, pink accent `#e8467c`, gold, teal)
@@ -72,10 +72,10 @@ Preferred communication style: Simple, everyday language.
 
 ### Coin Economy
 
-- Coins stored in `UserProfile.coins` in AsyncStorage
-- `spendCoins(amount)` returns `false` if insufficient balance
-- `addCoins(amount)` simulates a purchase (no real payment integration)
-- Nickname changes cost 50 coins
+- seeds stored in `UserProfile.seeds` in AsyncStorage
+- `spendseeds(amount)` returns `false` if insufficient balance
+- `addseeds(amount)` simulates a purchase (no real payment integration)
+- Nickname changes cost 50 seeds
 
 ### Internationalization
 

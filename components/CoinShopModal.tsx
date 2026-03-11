@@ -9,7 +9,6 @@ import {
   Alert,
   Platform,
 } from "react-native";
-// ✅ 상단 여백 확보를 위한 인셋 임포트
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -24,14 +23,17 @@ interface CoinPackage {
   price: string;
   labelKey: string;
   popular?: boolean;
+  isVIP?: boolean;
+  isFirstTrial?: boolean;
 }
 
-const PACKAGES: CoinPackage[] = [
-  { id: "p1", coins: 50, price: "$0.99", labelKey: "Starter" },
-  { id: "p2", coins: 150, price: "$2.49", labelKey: "Standard", popular: true },
-  { id: "p3", coins: 350, price: "$4.99", labelKey: "Value" },
-  { id: "p4", coins: 800, price: "$9.99", labelKey: "Premium" },
-  { id: "p5", coins: 2000, price: "$19.99", labelKey: "Ultra" },
+const PACKAGES_DATA: CoinPackage[] = [
+  { id: "p1", coins: 130, price: "$0.99", labelKey: "First Time Only", isFirstTrial: true },
+  { id: "p2", coins: 200, price: "$2.99", labelKey: "Starter" },
+  { id: "p3", coins: 370, price: "$4.99", labelKey: "Standard", popular: true },
+  { id: "p4", coins: 750, price: "$9.99", labelKey: "Value" },
+  { id: "p5", coins: 1900, price: "$24.99", labelKey: "Premium" },
+  { id: "p6", coins: 4000, price: "$49.99", labelKey: "VIP Ultra", isVIP: true },
 ];
 
 interface Props {
@@ -40,15 +42,17 @@ interface Props {
 }
 
 export function CoinShopModal({ visible, onClose }: Props) {
-  const insets = useSafeAreaInsets(); // ✅ 기기별 인셋 값 가져오기
+  const insets = useSafeAreaInsets();
   const { user, addCoins } = useAuth();
   const [purchasing, setPurchasing] = useState<string | null>(null);
 
   const lang = useMemo(() => (user?.language || "ko") as Language, [user?.language]);
 
-  // ✅ [수정] 상단 겹침 방지 여백 계산
-  // presentationStyle="formSheet"일 때는 시스템에서 여백을 어느 정도 주지만,
-  // 더 확실하게 내리기 위해 인셋 값을 활용합니다.
+  const filteredPackages = useMemo(() => {
+    const isFirstTime = user?.isFirstPurchase ?? true;
+    return PACKAGES_DATA.filter(pkg => !pkg.isFirstTrial || isFirstTime);
+  }, [user?.isFirstPurchase]);
+
   const topPadding = Platform.OS === "android" ? insets.top + 10 : 10;
 
   async function handlePurchase(pkg: CoinPackage) {
@@ -61,8 +65,10 @@ export function CoinShopModal({ visible, onClose }: Props) {
       setPurchasing(null);
 
       Alert.alert(
-        t(lang, "save"),
-        `${pkg.coins} ${t(lang, "coins")} ${t(lang, "connected")}`,
+        lang === "ko" ? "구매 완료! 🌻" : "Purchase Complete! 🌻",
+        lang === "ko"
+          ? `🌻 ${pkg.coins.toLocaleString()} Seeds가 지급됐어요!`
+          : `🌻 ${pkg.coins.toLocaleString()} Seeds have been added!`,
         [{ text: "OK", onPress: onClose }]
       );
     }, 1200);
@@ -75,81 +81,81 @@ export function CoinShopModal({ visible, onClose }: Props) {
       presentationStyle="formSheet"
       onRequestClose={onClose}
     >
-      {/* ✅ [수정] container에 paddingTop 부여 */}
       <View style={[styles.container, { paddingTop: topPadding }]}>
         <View style={styles.header}>
-          <Text style={styles.title}>{t(lang, "coins")}</Text>
+          <Text style={styles.title}>🌻 Seed Shop</Text>
           <Pressable onPress={onClose} style={styles.closeBtn}>
             <Ionicons name="close" size={24} color={Colors.textSecondary} />
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 20 }]}>
-          <View style={styles.balanceCard}>
-            <LinearGradient
-              colors={["rgba(245,200,66,0.15)", "rgba(245,200,66,0.05)"]}
-              style={styles.balanceGrad}
-            >
-              <Ionicons name="star" size={28} color={Colors.gold} />
-              <Text style={styles.balanceLabel}>
-                {t(lang, "edit_profile") === "프로필 수정" ? "보유 잔액" : "Current Balance"}
-              </Text>
-              <Text style={styles.balanceCount}>{user?.coins ?? 0}</Text>
-              <Text style={styles.balanceSub}>{t(lang, "coins")}</Text>
-            </LinearGradient>
+        {/* 보유 seed 표시 */}
+        <View style={styles.balanceCard}>
+          <Text style={styles.balanceLabel}>
+            {lang === "ko" ? "보유 Seeds" : "Your Seeds"}
+          </Text>
+          <View style={styles.balanceRow}>
+            <Text style={styles.balanceEmoji}>🌻</Text>
+            <Text style={styles.balanceAmount}>{(user?.coins ?? 0).toLocaleString()}</Text>
           </View>
+        </View>
 
-          <Text style={styles.coinUses}>
-            {t(lang, "post_something") === "무엇을 하고 싶나요?" 
-              ? "코인을 사용하여 메시지를 보내거나 통화를 시작하세요."
-              : "Use coins to send messages or start calls with others."}
-          </Text>
-
+        <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 20 }]}>
           <Text style={styles.sectionLabel}>
-            {t(lang, "edit_profile") === "프로필 수정" ? "패키지 선택" : "Choose a Package"}
+            {lang === "ko" ? "패키지 선택" : "Choose a Package"}
           </Text>
 
-          {PACKAGES.map((pkg) => (
+          {filteredPackages.map((pkg) => (
             <Pressable
               key={pkg.id}
               style={({ pressed }) => [
                 styles.pkgCard,
                 pkg.popular && styles.pkgCardPopular,
+                pkg.isVIP && styles.pkgCardVIP,
                 { opacity: pressed || purchasing === pkg.id ? 0.85 : 1 },
               ]}
               onPress={() => handlePurchase(pkg)}
               disabled={!!purchasing}
             >
-              {pkg.popular && (
-                <View style={styles.popularBadge}>
-                  <Text style={styles.popularText}>POPULAR</Text>
+              {pkg.isVIP && (
+                <LinearGradient
+                  colors={["rgba(245, 200, 66, 0.1)", "rgba(245, 200, 66, 0.02)"]}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
+
+              {(pkg.popular || pkg.isVIP) && (
+                <View style={[styles.popularBadge, pkg.isVIP && { backgroundColor: Colors.gold }]}>
+                  <Text style={[styles.popularText, pkg.isVIP && { color: "#1a1a1f" }]}>
+                    {pkg.isVIP ? "BEST VALUE" : "POPULAR"}
+                  </Text>
                 </View>
               )}
+
               <View style={styles.pkgLeft}>
-                <View style={styles.coinIconWrap}>
-                  <LinearGradient
-                    colors={["#f5c842", "#e8a020"]}
-                    style={styles.coinIcon}
-                  >
-                    <Ionicons name="star" size={18} color="#1a1a1f" />
-                  </LinearGradient>
-                </View>
+                <LinearGradient
+                  colors={pkg.isVIP ? ["#FFD700", "#FFA500"] : ["#f5c842", "#e8a020"]}
+                  style={styles.coinIcon}
+                >
+                  <Text style={styles.seedEmoji}>{pkg.isVIP ? "🏆" : "🌻"}</Text>
+                </LinearGradient>
                 <View>
-                  <Text style={styles.pkgLabel}>{pkg.labelKey}</Text>
-                  <Text style={styles.pkgCoins}>{pkg.coins.toLocaleString()} {t(lang, "coins")}</Text>
+                  <Text style={[styles.pkgLabel, pkg.isVIP && { color: Colors.gold }]}>{pkg.labelKey}</Text>
+                  <Text style={styles.pkgCoins}>{pkg.coins.toLocaleString()} 🌻 Seeds</Text>
                 </View>
               </View>
+
               <View style={styles.pkgRight}>
                 {purchasing === pkg.id ? (
                   <Text style={styles.purchasing}>...</Text>
                 ) : (
                   <LinearGradient
-                    colors={pkg.popular ? [Colors.accent, "#c01f5d"] : [Colors.backgroundCard, Colors.backgroundElevated]}
+                    colors={pkg.isVIP ? ["#FFD700", "#FFA500"] : (pkg.popular ? [Colors.accent, "#c01f5d"] : [Colors.backgroundCard, Colors.border])}
                     style={styles.pkgPrice}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
                   >
-                    <Text style={[styles.pkgPriceText, { color: pkg.popular ? "#fff" : Colors.textPrimary }]}>
+                    <Text style={[styles.pkgPriceText, { color: (pkg.popular || pkg.isVIP) ? "#1a1a1f" : Colors.textPrimary }]}>
                       {pkg.price}
                     </Text>
                   </LinearGradient>
@@ -157,10 +163,6 @@ export function CoinShopModal({ visible, onClose }: Props) {
               </View>
             </Pressable>
           ))}
-
-          <Text style={styles.disclaimer}>
-            {t(lang, "cancel") === "취소" ? "본 구매는 테스트용 시뮬레이션입니다." : "Purchases are simulated for demonstration."}
-          </Text>
         </ScrollView>
       </View>
     </Modal>
@@ -178,40 +180,38 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  title: { fontSize: 18, fontWeight: "800", color: Colors.textPrimary }, // ✅ 폰트 굵기 강화
+  title: { fontSize: 18, fontWeight: "800", color: Colors.textPrimary },
   closeBtn: { padding: 4 },
-  body: { padding: 20, gap: 14 },
-  balanceCard: { borderRadius: 18, overflow: "hidden" },
-  balanceGrad: {
-    alignItems: "center",
-    paddingVertical: 24,
-    gap: 4,
+  balanceCard: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: Colors.backgroundCard,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(245,200,66,0.3)",
-    borderRadius: 18,
+    borderColor: Colors.border,
+    alignItems: "center",
+    gap: 4,
   },
   balanceLabel: {
     fontSize: 12,
+    fontWeight: "700",
     color: Colors.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
-  balanceCount: {
-    fontSize: 48,
-    fontWeight: "800",
+  balanceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  balanceEmoji: { fontSize: 22 },
+  balanceAmount: {
+    fontSize: 28,
+    fontWeight: "900",
     color: Colors.gold,
-    lineHeight: 56,
   },
-  balanceSub: {
-    fontSize: 13,
-    color: Colors.textMuted,
-  },
-  coinUses: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    textAlign: "center",
-    lineHeight: 20,
-  },
+  body: { padding: 20, gap: 14 },
   sectionLabel: {
     fontSize: 12,
     fontWeight: "700",
@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: Colors.backgroundCard,
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 16,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -234,24 +234,29 @@ const styles = StyleSheet.create({
   },
   pkgCardPopular: {
     borderColor: Colors.accent,
+    borderWidth: 1.5,
+  },
+  pkgCardVIP: {
+    borderColor: Colors.gold,
+    borderWidth: 2,
+    backgroundColor: "#1c1c1e",
+    shadowColor: Colors.gold,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   popularBadge: {
     position: "absolute",
-    top: 8,
-    right: 8,
+    top: 0,
+    right: 0,
     backgroundColor: Colors.accent,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderBottomLeftRadius: 12,
   },
-  popularText: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: "#fff",
-    letterSpacing: 0.5,
-  },
+  popularText: { fontSize: 10, fontWeight: "900", color: "#fff" },
   pkgLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  coinIconWrap: {},
   coinIcon: {
     width: 44,
     height: 44,
@@ -259,21 +264,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  pkgLabel: { fontSize: 15, fontWeight: "700", color: Colors.textPrimary },
-  pkgCoins: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  pkgRight: {},
+  seedEmoji: { fontSize: 20 },
+  pkgLabel: { fontSize: 15, fontWeight: "800", color: Colors.textPrimary },
+  pkgCoins: { fontSize: 14, color: Colors.textSecondary, marginTop: 2, fontWeight: "600" },
   pkgPrice: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: 12,
   },
-  pkgPriceText: { fontSize: 15, fontWeight: "700" },
+  pkgPriceText: { fontSize: 16, fontWeight: "800" },
+  pkgRight: { alignItems: "flex-end" },
   purchasing: { fontSize: 13, fontWeight: "600", color: Colors.textMuted },
-  disclaimer: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    textAlign: "center",
-    marginTop: 10,
-    paddingBottom: 20,
-  },
 });

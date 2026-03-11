@@ -19,7 +19,7 @@ type TranslationKey =
   | "board"
   | "profile"
   | "settings"
-  | "coins"
+  | "seeds"
   | "start_matching"
   | "cancel"
   | "searching"
@@ -44,7 +44,7 @@ type TranslationKey =
   | "edit_profile"
   | "call"
   | "message"
-  | "coins_required"
+  | "seeds_required"
   | "no_profiles"
   | "no_posts"
   | "no_conversations"
@@ -66,7 +66,7 @@ type TranslationKey =
   | "voice_intro"
   | "hold_to_record"
   | "delete_account"
-  | "get_coins"
+  | "get_seeds"
   | "call_cost_alert"
   | "msg_cost_alert"
   | "match_hint"
@@ -108,7 +108,7 @@ export const translations: Translations = {
     board: "Board",
     profile: "Profile",
     settings: "Settings",
-    coins: "Coins",
+    seeds: "seeds",
     start_matching: "Start Matching",
     cancel: "Cancel",
     searching: "Searching for a match...",
@@ -133,7 +133,7 @@ export const translations: Translations = {
     edit_profile: "Edit Profile",
     call: "Call",
     message: "Message",
-    coins_required: "Coins Required",
+    seeds_required: "seeds Required",
     no_profiles: "No profiles available",
     no_posts: "No posts yet",
     no_conversations: "No conversations yet",
@@ -155,9 +155,9 @@ export const translations: Translations = {
     voice_intro: "Voice Introduction",
     hold_to_record: "Hold to record voice",
     delete_account: "Delete Account",
-    get_coins: "Get Coins",
-    call_cost_alert: "You need {cost} coins to call. You have: {userCoins}",
-    msg_cost_alert: "You need {cost} coins to message. You have: {userCoins}",
+    get_seeds: "Get seeds",
+    call_cost_alert: "You need {cost} seeds to call. You have: {userseeds}",
+    msg_cost_alert: "You need {cost} seeds to message. You have: {userseeds}",
     match_hint: "Get matched randomly for a free 7-minute call",
     start_call: "Start Call",
     match_success: "Matched!",
@@ -194,7 +194,7 @@ export const translations: Translations = {
     board: "게시판",
     profile: "프로필",
     settings: "설정",
-    coins: "코인",
+    seeds: "코인",
     start_matching: "매칭 시작",
     cancel: "취소",
     searching: "매칭 상대를 찾는 중...",
@@ -219,7 +219,7 @@ export const translations: Translations = {
     edit_profile: "프로필 편집",
     call: "통화",
     message: "메시지",
-    coins_required: "코인 필요",
+    seeds_required: "코인 필요",
     no_profiles: "프로필이 없습니다",
     no_posts: "게시글이 없습니다",
     no_conversations: "대화가 없습니다",
@@ -241,9 +241,9 @@ export const translations: Translations = {
     voice_intro: "음성 소개",
     hold_to_record: "누르고 있으면 녹음됩니다",
     delete_account: "계정 삭제",
-    get_coins: "충전하기",
-    call_cost_alert: "전화하려면 {cost} 코인이 필요합니다. 현재 보유: {userCoins}",
-    msg_cost_alert: "메시지를 보내려면 {cost} 코인이 필요합니다. 현재 보유: {userCoins}",
+    get_seeds: "충전하기",
+    call_cost_alert: "전화하려면 {cost} 코인이 필요합니다. 현재 보유: {userseeds}",
+    msg_cost_alert: "메시지를 보내려면 {cost} 코인이 필요합니다. 현재 보유: {userseeds}",
     match_hint: "랜덤으로 매칭되어 7분간 무료 통화를 즐겨보세요",
     start_call: "통화 시작",
     match_success: "매칭 성공!",
@@ -280,7 +280,7 @@ export const translations: Translations = {
     board: "掲示板",
     profile: "プロフィール",
     settings: "設定",
-    coins: "コイン",
+    seeds: "コイン",
     start_matching: "マッチング開始",
     cancel: "キャンセル",
     searching: "マッチングを探しています...",
@@ -305,7 +305,7 @@ export const translations: Translations = {
     edit_profile: "プロフィール編集",
     call: "電話",
     message: "メッセージ",
-    coins_required: "コインが必要",
+    seeds_required: "コインが必要",
     no_profiles: "プロフィールがありません",
     no_posts: "投稿がありません",
     no_conversations: "会話がありません",
@@ -327,9 +327,9 @@ export const translations: Translations = {
     voice_intro: "音声紹介",
     hold_to_record: "長押しで録音",
     delete_account: "アカウント削除",
-    get_coins: "チャージする",
-    call_cost_alert: "{cost}コインが必要です。保有：{userCoins}",
-    msg_cost_alert: "送信には{cost}コインが必要です。保有：{userCoins}",
+    get_seeds: "チャージする",
+    call_cost_alert: "{cost}コインが必要です。保有：{userseeds}",
+    msg_cost_alert: "送信には{cost}コインが必要です。保有：{userseeds}",
     match_hint: "ランダムにマッチングして7分間の無料通話を楽しもう",
     start_call: "通話開始",
     match_success: "マッチング成功！",
@@ -366,7 +366,7 @@ export const translations: Translations = {
     board: "Tablero",
     profile: "Perfil",
     settings: "Ajustes",
-    coins: "Monedas",
+    seeds: "Monedas",
     start_matching: "Iniciar Matching",
     cancel: "Cancelar",
     searching: "Buscando match...",
@@ -391,7 +391,7 @@ export const translations: Translations = {
     edit_profile: "Editar perfil",
     call: "Llamar",
     message: "Mensaje",
-    coins_required: "Se requieren monedas",
+    seeds_required: "Se requieren monedas",
     no_profiles: "Sin perfiles disponibles",
     no_posts: "Sin publicaciones",
     no_conversations: "Sin conversaciones",
@@ -413,9 +413,9 @@ export const translations: Translations = {
     voice_intro: "Introducción de voz",
     hold_to_record: "Mantén para grabar",
     delete_account: "Eliminar cuenta",
-    get_coins: "Obtener monedas",
-    call_cost_alert: "Necesitas {cost} monedas. Tienes: {userCoins}",
-    msg_cost_alert: "Necesitas {cost} monedas para el mensaje. Tienes: {userCoins}",
+    get_seeds: "Obtener monedas",
+    call_cost_alert: "Necesitas {cost} monedas. Tienes: {userseeds}",
+    msg_cost_alert: "Necesitas {cost} monedas para el mensaje. Tienes: {userseeds}",
     match_hint: "Empareja al azar para una llamada gratuita de 7 minutos",
     start_call: "Iniciar llamada",
     match_success: "¡Éxito!",
@@ -452,7 +452,7 @@ export const translations: Translations = {
     board: "板块",
     profile: "个人资料",
     settings: "设置",
-    coins: "金币",
+    seeds: "金币",
     start_matching: "开始匹配",
     cancel: "取消",
     searching: "正在寻找匹配...",
@@ -477,7 +477,7 @@ export const translations: Translations = {
     edit_profile: "编辑个人资料",
     call: "通话",
     message: "消息",
-    coins_required: "需要金币",
+    seeds_required: "需要金币",
     no_profiles: "没有可用的资料",
     no_posts: "暂无帖子",
     no_conversations: "暂无对话",
@@ -499,9 +499,9 @@ export const translations: Translations = {
     voice_intro: "语音介绍",
     hold_to_record: "按住录音",
     delete_account: "删除账户",
-    get_coins: "获取金币",
-    call_cost_alert: "通话需要{cost}金币，你有：{userCoins}",
-    msg_cost_alert: "消息需要{cost}金币，你有：{userCoins}",
+    get_seeds: "获取金币",
+    call_cost_alert: "通话需要{cost}金币，你有：{userseeds}",
+    msg_cost_alert: "消息需要{cost}金币，你有：{userseeds}",
     match_hint: "随机匹配，享受7分钟免费通话",
     start_call: "开始通话",
     match_success: "匹配成功！",

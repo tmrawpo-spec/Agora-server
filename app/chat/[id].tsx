@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -21,10 +21,35 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/constants/firebase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData, Message } from "@/contexts/DataContext";
+import { SERVER_URL } from "@/constants/agora";
 import { Colors } from "@/constants/colors";
 import { t } from "@/constants/i18n";
 
 function MessageBubble({ msg, isMe }: { msg: Message; isMe: boolean }) {
+  // ✅ 통화 기록은 가운데 표시
+  if (msg.type === "call" || msg.type === "missed_call") {
+    return (
+      <View style={styles.callRecordWrap}>
+        <View style={[
+          styles.callRecord,
+          { borderColor: msg.type === "missed_call" ? Colors.danger : Colors.teal }
+        ]}>
+          <Ionicons
+            name={msg.type === "missed_call" ? "call" : "call"}
+            size={14}
+            color={msg.type === "missed_call" ? Colors.danger : Colors.teal}
+          />
+          <Text style={[
+            styles.callRecordText,
+            { color: msg.type === "missed_call" ? Colors.danger : Colors.teal }
+          ]}>
+            {msg.text}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View
       style={[
@@ -54,7 +79,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
-  const { conversations, sendMessage, refreshConversations } = useData();
+  const { conversations, sendMessage, refreshConversations, subscribeToMessages } = useData();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -62,6 +87,7 @@ export default function ChatScreen() {
 
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [realtimeMsgs, setRealtimeMsgs] = useState<Message[]>([]);
   const flatRef = useRef<FlatList>(null);
 
   useFocusEffect(
@@ -70,11 +96,19 @@ export default function ChatScreen() {
     }, [id])
   );
 
-  // ✅ 안전하게 문자열 비교
-  const convo = conversations.find((c) => String(c.id) === String(id));
-  const msgs = convo?.messages ?? [];
-  const matchedUser = convo?.matchedUser;
+  // ✅ Firestore 실시간 메시지 구독
+  useEffect(() => {
+    if (!id) return;
+    const unsubscribe = subscribeToMessages(String(id), (msgs) => {
+      setRealtimeMsgs(msgs);
+    });
+    return () => unsubscribe();
+  }, [id]);
 
+  const convo = conversations.find((c) => String(c.id) === String(id));
+  // ✅ Firestore 실시간 메시지 우선 사용, 없으면 로컬 메시지
+  const msgs = realtimeMsgs.length > 0 ? realtimeMsgs : (convo?.messages ?? []);
+  const matchedUser = convo?.matchedUser;
   const handleProfilePress = () => {
     if (!matchedUser) return;
 
@@ -105,6 +139,25 @@ export default function ChatScreen() {
     try {
       await sendMessage(id, user.id, myText);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      // ✅ 상대방에게 FCM 알림 전송
+      if (matchedUser?.fcmToken) {
+        try {
+          await fetch(`${SERVER_URL}/send-message-notification`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              targetToken: matchedUser.fcmToken,
+              senderName: user.nickname ?? "User",
+              message: myText,
+              convoId: id,
+            }),
+          });
+        } catch (e) {
+          console.log("알림 전송 실패:", e);
+        }
+      }
+
       await refreshConversations();
     } catch (error) {
       console.error("전송 에러:", error);
@@ -134,17 +187,18 @@ export default function ChatScreen() {
         return;
       }
 
-      const targetToken = snap.data()?.TargetToken;
+      const data = snap.data();
+const targetToken = data?.fcmToken || data?.TargetToken;
 
-      if (!targetToken) {
-        Alert.alert(
-          "Error",
-          lang === "ko"
-            ? "상대방의 푸시 토큰이 없습니다."
-            : "Target push token not found."
-        );
-        return;
-      }
+if (!targetToken) {
+  Alert.alert(
+    "Error",
+    lang === "ko"
+      ? "상대방의 푸시 토큰이 없습니다."
+      : "Target push token not found."
+  );
+  return;
+}
 
       router.push({
         pathname: "/matching/calling",
@@ -324,4 +378,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, backgroundColor: Colors.inputBackground, borderWidth: 1, borderColor: Colors.inputBorder, borderRadius: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, color: Colors.textPrimary, fontSize: 15, maxHeight: 100 },
   sendBtn: { borderRadius: 20, overflow: "hidden" },
   sendBtnGrad: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22 },
+  callRecordWrap: { alignItems: "center", marginVertical: 4 },
+  callRecord: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1, backgroundColor: "rgba(0,0,0,0.2)" },
+  callRecordText: { fontSize: 13, fontWeight: "600" },
 });

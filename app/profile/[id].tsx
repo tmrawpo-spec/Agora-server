@@ -17,21 +17,22 @@ import { Audio } from "expo-av";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { doc, getDoc } from "firebase/firestore"; // ✅ Firestore 직조회를 위해 추가
-import { db } from "../../constants/firebase"; // ✅ DB 인스턴스 추가
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../constants/firebase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData, Post } from "@/contexts/DataContext";
 import { Colors } from "@/constants/colors";
 import { t, Language } from "@/constants/i18n";
 
-const CALL_COST = 20;
-const MSG_COST = 5;
-const REVEAL_COST = 10; 
+const CALL_COST = 80;
+const MSG_COST = 50;
+const REVEAL_COST = 30;
 
 function UserPostCard({ post }: { post: Post }) {
   return (
-    <Pressable 
-      style={styles.userPostCard} 
+    <Pressable
+      style={styles.userPostCard}
       onPress={() => router.push({ pathname: "/post/[id]", params: { id: post.id } })}
     >
       <View style={styles.userPostMain}>
@@ -61,15 +62,13 @@ export default function ProfileScreen() {
   const { user, spendCoins } = useAuth();
   const { addConversation, conversations, posts } = useData();
 
-  const [fullProfile, setFullProfile] = useState<any>(null); // ✅ 최신 DB 데이터를 저장할 상태
-  const [isFetching, setIsFetching] = useState(false); // ✅ 로딩 상태
+  const [fullProfile, setFullProfile] = useState<any>(null);
+  const [isFetching, setIsFetching] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const lang = (user?.language || "ko") as Language;
-
   const isFemale = useMemo(() => user?.gender === "female", [user?.gender]);
 
-  // 초기 profile 파싱 (전달받은 데이터)
   let initialProfile: any = null;
   try {
     if (params.profileData) initialProfile = JSON.parse(params.profileData);
@@ -90,19 +89,16 @@ export default function ProfileScreen() {
     console.error("Profile parsing error", e);
   }
 
-  // ✅ [핵심 수정] 화면 진입 시 해당 유저의 최신 데이터를 DB에서 직접 가져옴
   useEffect(() => {
     async function fetchFullProfile() {
       const targetId = params.id || initialProfile?.id;
       if (!targetId) return;
-
       setIsFetching(true);
       try {
         const userRef = doc(db, "users", targetId);
         const snap = await getDoc(userRef);
         if (snap.exists()) {
           const data = snap.data();
-          console.log("📡 [Profile] 최신 데이터 로드 완료 (FCM 토큰 유무):", !!data.fcmToken);
           setFullProfile({ id: snap.id, ...data });
         }
       } catch (err) {
@@ -117,8 +113,9 @@ export default function ProfileScreen() {
   const profile = fullProfile || initialProfile;
 
   const userPosts = useMemo(() => {
-    return posts.filter((p) => p.userId === (profile?.id || params.id))
-                .sort((a, b) => b.createdAt - a.createdAt);
+    return posts
+      .filter((p) => p.userId === (profile?.id || params.id))
+      .sort((a, b) => b.createdAt - a.createdAt);
   }, [posts, profile, params.id]);
 
   const isExistingChat = useMemo(() => {
@@ -126,14 +123,21 @@ export default function ProfileScreen() {
     return conversations.some((convo: any) => convo.matchedUser?.id === profile.id);
   }, [conversations, profile]);
 
-  const [isUnlocked, setIsUnlocked] = useState(true);
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const UNLOCK_KEY = `@nighton_unlocked_${params.id}`;
 
   useEffect(() => {
-    if (isFemale) {
-      setIsUnlocked(true);
-    } else {
-      setIsUnlocked(isExistingChat);
+    async function loadUnlockState() {
+      if (isFemale) { setIsUnlocked(true); return; }
+      if (isExistingChat) { setIsUnlocked(true); return; }
+      try {
+        const saved = await AsyncStorage.getItem(UNLOCK_KEY);
+        if (saved === "true") setIsUnlocked(true);
+      } catch (e) {
+        console.log("unlock 상태 로드 실패:", e);
+      }
     }
+    loadUnlockState();
   }, [isExistingChat, isFemale]);
 
   const effectiveUnlocked = isFemale || isUnlocked;
@@ -143,9 +147,7 @@ export default function ProfileScreen() {
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
 
   useEffect(() => {
-    return () => {
-      if (sound) sound.unloadAsync();
-    };
+    return () => { if (sound) sound.unloadAsync(); };
   }, [sound]);
 
   if (!profile) {
@@ -162,22 +164,30 @@ export default function ProfileScreen() {
   }
 
   async function handleUnlock() {
-    if (isFemale) {
-      setIsUnlocked(true);
-      return;
-    }
+    if (isFemale) { setIsUnlocked(true); return; }
     const ok = await spendCoins(REVEAL_COST);
     if (!ok) {
-      Alert.alert(t(lang, "coins_required"), lang === "ko" ? `${REVEAL_COST} 코인이 필요합니다.` : `You need ${REVEAL_COST} coins.`);
+      Alert.alert(
+        lang === "ko" ? "Seeds 부족" : "Not Enough Seeds",
+        lang === "ko" ? `🌻 ${REVEAL_COST} Seeds가 필요합니다.` : `You need 🌻 ${REVEAL_COST} Seeds.`
+      );
       return;
     }
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    try {
+      await AsyncStorage.setItem(UNLOCK_KEY, "true");
+    } catch (e) {
+      console.log("unlock 저장 실패:", e);
+    }
     setIsUnlocked(true);
   }
 
   async function toggleVoice() {
     if (!effectiveUnlocked) {
-      Alert.alert(lang === "ko" ? "잠김" : "Locked", lang === "ko" ? "먼저 프로필을 공개해주세요." : "Please unlock the profile first.");
+      Alert.alert(
+        lang === "ko" ? "잠김" : "Locked",
+        lang === "ko" ? "먼저 프로필을 공개해주세요." : "Please unlock the profile first."
+      );
       return;
     }
     if (!profile.voiceIntroUrl) return;
@@ -185,18 +195,16 @@ export default function ProfileScreen() {
       if (sound) {
         const status = await sound.getStatusAsync();
         if (status.isLoaded) {
-          if (isPlaying) {
-            await sound.pauseAsync();
-            setIsPlaying(false);
-          } else {
-            await sound.playAsync();
-            setIsPlaying(true);
-          }
+          if (isPlaying) { await sound.pauseAsync(); setIsPlaying(false); }
+          else { await sound.playAsync(); setIsPlaying(true); }
         }
         return;
       }
       setIsLoadingAudio(true);
-      const { sound: newSound } = await Audio.Sound.createAsync({ uri: profile.voiceIntroUrl }, { shouldPlay: true });
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        { uri: profile.voiceIntroUrl },
+        { shouldPlay: true }
+      );
       setSound(newSound);
       setIsPlaying(true);
       setIsLoadingAudio(false);
@@ -211,50 +219,43 @@ export default function ProfileScreen() {
     }
   }
 
-  // ✅ [수정된 handleCall] 이제 targetToken을 확실히 확보하여 전달합니다.
   async function handleCall() {
     if (!effectiveUnlocked) return;
-    
-    // ✅ [수정] fcmToken과 TargetToken 둘 다 확인합니다.
     const targetToken = profile?.fcmToken || profile?.TargetToken;
-
-    console.log("📡 [handleCall] 추출된 토큰:", targetToken); // 테스트용 로그 추가
-
     if (!targetToken) {
       Alert.alert(
-        lang === "ko" ? "연결 불가" : "Cannot Call", 
-        lang === "ko" ? "상대방의 푸시 정보를 불러올 수 없습니다. 다시 시도해주세요." : "Cannot find recipient's push token."
+        lang === "ko" ? "연결 불가" : "Cannot Call",
+        lang === "ko" ? "상대방의 푸시 정보를 불러올 수 없습니다." : "Cannot find recipient's push token."
       );
       return;
     }
-
-    // 2. 코인 차감 로직
     if (!isFemale && !isExistingChat) {
       const ok = await spendCoins(CALL_COST);
       if (!ok) {
-        Alert.alert(t(lang, "coins_required"), lang === "ko" ? `전화하려면 ${CALL_COST} 코인이 필요합니다.` : `Need ${CALL_COST} coins to call.`);
+        Alert.alert(
+          lang === "ko" ? "Seeds 부족" : "Not Enough Seeds",
+          lang === "ko" ? `전화하려면 🌻 ${CALL_COST} Seeds가 필요합니다.` : `Need 🌻 ${CALL_COST} Seeds to call.`
+        );
         return;
       }
     }
-
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    // 3. 대화방 생성 및 이동
     try {
       setIsFetching(true);
-      // addConversation 시에도 토큰이 포함된 최신 profile을 넘깁니다.
-      const convo = await addConversation({ ...profile, fcmToken: targetToken }); 
-      
-      router.push({ 
-        pathname: "/matching/calling", 
-        params: { 
-          convoId: convo.id, 
+      const convo = await addConversation(
+        { ...profile, fcmToken: targetToken },
+        { isFriend: isExistingChat, myUserId: user?.id }
+      );
+      router.push({
+        pathname: "/matching/calling",
+        params: {
+          convoId: convo.id,
           profileName: profile.nickname,
-          targetToken: targetToken, // ✅ 이제 여기서 undefined가 아닌 실제 값이 넘어갑니다.
-          isAlreadyFriend: "true", 
+          targetToken: targetToken,
+          isAlreadyFriend: "true",
           isLookTab: "false",
-          isReceiver: "false"
-        } 
+          isReceiver: "false",
+        },
       });
     } catch (err) {
       console.error(err);
@@ -268,24 +269,28 @@ export default function ProfileScreen() {
     if (!isFemale && !isExistingChat) {
       const ok = await spendCoins(MSG_COST);
       if (!ok) {
-        Alert.alert(t(lang, "coins_required"), lang === "ko" ? `메시지 전송에 ${MSG_COST} 코인이 필요합니다.` : `Need ${MSG_COST} coins to message.`);
+        Alert.alert(
+          lang === "ko" ? "Seeds 부족" : "Not Enough Seeds",
+          lang === "ko" ? `메시지 전송에 🌻 ${MSG_COST} Seeds가 필요합니다.` : `Need 🌻 ${MSG_COST} Seeds to message.`
+        );
         return;
       }
     }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const convo = await addConversation(profile);
+    const convo = await addConversation(profile, { myUserId: user?.id });
     router.push({ pathname: "/chat/[id]", params: { id: convo.id } });
   }
 
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
+      {/* 헤더 */}
       <View style={styles.header}>
         <Pressable style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color={Colors.textPrimary} />
         </Pressable>
         <Text style={styles.headerTitle}>{effectiveUnlocked ? profile.nickname : "???"}</Text>
         <View style={styles.headerCoins}>
-          <Ionicons name="star" size={14} color={Colors.gold} />
+          <Text style={styles.headerCoinsEmoji}>🌻</Text>
           <Text style={styles.headerCoinsText}>{user?.coins ?? 0}</Text>
         </View>
       </View>
@@ -326,15 +331,15 @@ export default function ProfileScreen() {
               </Pressable>
             )}
 
+            {/* 액션 버튼 */}
             <View style={[styles.actions, !effectiveUnlocked && { opacity: 0.3 }]}>
               <Pressable style={styles.msgBtn} onPress={handleMessage}>
                 <View style={styles.actionInner}>
                   <Ionicons name="chatbubble" size={22} color={Colors.teal} />
                   <Text style={[styles.actionText, { color: Colors.teal }]}>메시지</Text>
                   <View style={styles.costBadge}>
-                    <Ionicons name="star" size={10} color={Colors.teal} />
                     <Text style={[styles.costText, { color: Colors.teal }]}>
-                      {isFemale || isExistingChat ? "FREE" : MSG_COST}
+                      {isFemale || isExistingChat ? "FREE" : `🌻 ${MSG_COST}`}
                     </Text>
                   </View>
                 </View>
@@ -344,10 +349,9 @@ export default function ProfileScreen() {
                 <LinearGradient colors={[Colors.accent, "#c01f5d"]} style={styles.callBtnGrad}>
                   <Ionicons name="call" size={22} color="#fff" />
                   <Text style={styles.callText}>음성통화</Text>
-                  <View style={[styles.costBadge, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-                    <Ionicons name="star" size={10} color="#fff" />
+                  <View style={[styles.costBadge, { backgroundColor: "rgba(255,255,255,0.2)" }]}>
                     <Text style={[styles.costText, { color: "#fff" }]}>
-                      {isFemale || isExistingChat ? "FREE" : CALL_COST}
+                      {isFemale || isExistingChat ? "FREE" : `🌻 ${CALL_COST}`}
                     </Text>
                   </View>
                 </LinearGradient>
@@ -362,28 +366,40 @@ export default function ProfileScreen() {
           </View>
         )}
         renderItem={({ item }) => <UserPostCard post={item} />}
-        ListEmptyComponent={() => (
+        ListEmptyComponent={() =>
           effectiveUnlocked ? (
             <View style={styles.emptyPosts}>
               <Text style={styles.emptyPostsText}>작성한 게시글이 없습니다.</Text>
             </View>
           ) : null
-        )}
+        }
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
+      {/* 잠금 오버레이 */}
       {!effectiveUnlocked && (
         <BlurView intensity={95} style={StyleSheet.absoluteFill} tint="dark">
           <View style={styles.lockContainer}>
-            <View style={styles.lockCircle}><Ionicons name="lock-closed" size={40} color="#fff" /></View>
+            <View style={styles.lockCircle}>
+              <Ionicons name="lock-closed" size={40} color="#fff" />
+            </View>
             <Text style={styles.lockTitle}>{lang === "ko" ? "프로필 잠금" : "Profile Locked"}</Text>
-            <Text style={styles.lockSub}>{lang === "ko" ? `매칭된 친구의 정보를 더 보려면\n${REVEAL_COST} 코인이 필요합니다.` : `Matched friend's profile is locked.\nUse ${REVEAL_COST} coins to reveal.`}</Text>
+            <Text style={styles.lockSub}>
+              {lang === "ko"
+                ? `매칭된 친구의 정보를 더 보려면\n🌻 ${REVEAL_COST} Seeds가 필요합니다.`
+                : `Profile is locked.\nUse 🌻 ${REVEAL_COST} Seeds to reveal.`}
+            </Text>
             <Pressable style={styles.unlockBtn} onPress={handleUnlock}>
               <LinearGradient colors={[Colors.gold, "#b8860b"]} style={styles.unlockBtnGrad}>
-                <Ionicons name="star" size={18} color="#fff" /><Text style={styles.unlockBtnText}>{lang === "ko" ? "공개하기" : "Unlock"} ({REVEAL_COST} Coins)</Text>
+                <Text style={styles.unlockBtnEmoji}>🌻</Text>
+                <Text style={styles.unlockBtnText}>
+                  {lang === "ko" ? "공개하기" : "Unlock"} ({REVEAL_COST} Seeds)
+                </Text>
               </LinearGradient>
             </Pressable>
-            <Pressable style={styles.closeBtn} onPress={() => router.back()}><Text style={styles.closeBtnText}>뒤로가기</Text></Pressable>
+            <Pressable style={styles.closeBtn} onPress={() => router.back()}>
+              <Text style={styles.closeBtnText}>뒤로가기</Text>
+            </Pressable>
           </View>
         </BlurView>
       )}
@@ -403,6 +419,7 @@ const styles = StyleSheet.create({
   backBtn: { padding: 8 },
   headerTitle: { fontSize: 17, fontWeight: "700", color: Colors.textPrimary },
   headerCoins: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.backgroundCard, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  headerCoinsEmoji: { fontSize: 14 },
   headerCoinsText: { fontSize: 13, fontWeight: "700", color: Colors.gold },
   heroSection: { alignItems: "center", paddingVertical: 32, gap: 8 },
   avatarWrap: { position: "relative" },
@@ -414,7 +431,7 @@ const styles = StyleSheet.create({
   voiceBarActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   voiceText: { fontSize: 14, fontWeight: "700", color: Colors.textPrimary },
   voiceTextActive: { color: "#fff" },
-  actions: { flexDirection: "row", gap: 12, paddingHorizontal: 20, marginTop: 20, width: '100%' },
+  actions: { flexDirection: "row", gap: 12, paddingHorizontal: 20, marginTop: 20, width: "100%" },
   msgBtn: { flex: 1, borderRadius: 14, borderWidth: 1, borderColor: "rgba(61,217,197,0.4)", backgroundColor: "rgba(61,217,197,0.08)" },
   actionInner: { alignItems: "center", paddingVertical: 14, gap: 2 },
   actionText: { fontWeight: "700", fontSize: 14 },
@@ -423,8 +440,8 @@ const styles = StyleSheet.create({
   callText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   costBadge: { flexDirection: "row", alignItems: "center", gap: 2, marginTop: 2 },
   costText: { fontSize: 11, fontWeight: "800" },
-  postDivider: { width: '100%', paddingHorizontal: 20, paddingTop: 30, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: Colors.border, alignItems: 'flex-start' },
-  postDividerText: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
+  postDivider: { width: "100%", paddingHorizontal: 20, paddingTop: 30, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: Colors.border, alignItems: "flex-start" },
+  postDividerText: { fontSize: 16, fontWeight: "700", color: Colors.textPrimary },
   userPostCard: { flexDirection: "row", backgroundColor: Colors.backgroundCard, marginHorizontal: 20, marginTop: 12, padding: 15, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, gap: 12 },
   userPostMain: { flex: 1, justifyContent: "space-between" },
   userPostContent: { fontSize: 15, color: Colors.textPrimary, lineHeight: 20 },
@@ -441,10 +458,11 @@ const styles = StyleSheet.create({
   lockSub: { fontSize: 16, color: "rgba(255,255,255,0.7)", textAlign: "center", marginBottom: 30 },
   unlockBtn: { width: "100%", borderRadius: 30, overflow: "hidden" },
   unlockBtnGrad: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, gap: 8 },
+  unlockBtnEmoji: { fontSize: 18 },
   unlockBtnText: { color: "#fff", fontSize: 17, fontWeight: "700" },
   closeBtn: { marginTop: 20, padding: 10 },
   closeBtnText: { color: "rgba(255,255,255,0.5)", fontSize: 14 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center" },
   emptyText: { color: Colors.textMuted, fontSize: 16 },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
+  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center", zIndex: 999 },
 });

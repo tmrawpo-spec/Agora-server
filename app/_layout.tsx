@@ -86,14 +86,15 @@ export default function RootLayout() {
               setIncomingCall(null);
 
               router.push({
-                pathname: "/matching/calling",
-                params: {
-                  convoId: targetId,
-                  profileName: targetName,
-                  targetToken: callerToken,
-                  isReceiver: "true",
-                },
-              });
+  pathname: "/matching/calling",
+  params: {
+    convoId: targetId,
+    profileName: targetName,
+    targetToken: callerToken,
+    isReceiver: "true",
+    isAlreadyFriend: "false", // ✅ 랜덤매칭 수신자는 false
+  },
+});
             }}
             onReject={() => setIncomingCall(null)}
           />

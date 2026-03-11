@@ -24,11 +24,15 @@ import { Colors } from "@/constants/colors";
 import { t, Language } from "@/constants/i18n";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData } from "@/contexts/DataContext";
+import { db } from "@/constants/firebase";
+import { collection, addDoc } from "firebase/firestore";
 
 import { getAgoraEngine, destroyAgoraEngine } from "@/src/services/agoraEngine";
 import { AGORA_APP_ID, SERVER_URL } from "@/constants/agora";
 
-const CALL_DURATION_LIMIT = 7 * 60;
+const CALL_DURATION_LIMIT = 7 * 60; // 표시용 (7분처럼 보임)
+const ACTUAL_CALL_LIMIT = 6 * 60;   // 실제 통화 시간 (6분)
+const TIMER_INTERVAL = CALL_DURATION_LIMIT / ACTUAL_CALL_LIMIT; // 1초당 타이머 감소량
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -37,7 +41,7 @@ function pad(n: number) {
 function formatTime(secs: number) {
   const absSecs = Math.abs(secs);
   const m = Math.floor(absSecs / 60);
-  const s = absSecs % 60;
+  const s = Math.floor(absSecs % 60); // ✅ 소수점 버림
   return `${secs < 0 ? "-" : ""}${pad(m)}:${pad(s)}`;
 }
 
@@ -52,7 +56,7 @@ function uidFromString(str: string): number {
 export default function CallingScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { refreshConversations } = useData();
+  const { refreshConversations, sendMessage, conversations } = useData();
   const lang = useMemo(() => (user?.language || "ko") as Language, [user?.language]);
 
   // Agora 엔진
@@ -93,11 +97,14 @@ async function safeDestroyEngine() {
 
   const convoId = params.convoId;
   const profileName = params.profileName ?? "User";
-  const isFriend = params.isAlreadyFriend === "true";
   const isLookMode = params.isLookTab === "true";
   const targetToken = params.targetToken;
 
-  const [timeLeft, setTimeLeft] = useState(CALL_DURATION_LIMIT);
+  // ✅ convoId로 실제 친구 여부 확인 (수신자도 정확히 판단)
+  const convo = conversations.find(c => c.id === convoId);
+  const isFriend = convo?.isFriend === true || params.isAlreadyFriend === "true";
+
+  const [timeLeft, setTimeLeft] = useState(isFriend ? 0 : CALL_DURATION_LIMIT);
   const [callState, setCallState] = useState<"connecting" | "active">("connecting");
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(true);
@@ -290,16 +297,16 @@ async function safeDestroyEngine() {
 
     timerRef.current = setInterval(() => {
       setTimeLeft((prev) => {
-        const next = prev - 1;
+        if (isFriend) return prev + 1;
 
-        if (isFriend) return next;
-
+        // ✅ 실제 1초마다 타이머는 TIMER_INTERVAL만큼 줄어듦
+        // 6분(360초)이 흐르면 타이머는 7분(420초)에서 0이 됨
+        const next = prev - TIMER_INTERVAL;
         if (next <= 0) {
           if (timerRef.current) clearInterval(timerRef.current);
           handleEndCall();
           return 0;
         }
-
         return next;
       });
     }, 1000);
@@ -335,6 +342,29 @@ async function safeDestroyEngine() {
     console.log("[Calling] Haptics error:", e);
   }
 
+  // ✅ 통화 기록 채팅에 남기기
+  try {
+    if (convoId && user?.id) {
+      const wasConnected = callState === "active";
+      const callDuration = CALL_DURATION_LIMIT - timeLeft;
+
+      if (wasConnected) {
+        // 통화 연결됐었던 경우 - 통화 시간 기록
+        const minutes = Math.floor(callDuration / 60);
+        const seconds = callDuration % 60;
+        const durationText = minutes > 0 
+          ? `📞 통화 ${minutes}분 ${seconds}초` 
+          : `📞 통화 ${seconds}초`;
+        await sendMessage(convoId, user.id, durationText, "call");
+      } else {
+        // 연결 안 됐던 경우 - 부재중 기록
+        await sendMessage(convoId, user.id, "📵 부재중 통화", "missed_call");
+      }
+    }
+  } catch (e) {
+    console.log("[Calling] 통화 기록 저장 실패:", e);
+  }
+
   try {
     await refreshConversations();
   } catch (e) {
@@ -362,10 +392,9 @@ async function safeDestroyEngine() {
     opacity: pulseOpacity.value,
   }));
 
-  const progressPct = isFriend
-    ? 100
-    : Math.max(0, (timeLeft / CALL_DURATION_LIMIT) * 100);
-  const isWarning = !isFriend && timeLeft <= 60;
+  const progressPct = Math.max(0, (timeLeft / CALL_DURATION_LIMIT) * 100);
+  // ✅ 실제 1분 남은 시점 = 타이머상 7*60/6 = 70초
+const isWarning = !isFriend && timeLeft <= 70;
 
   return (
     <View

@@ -24,6 +24,7 @@
     "@react-native-firebase/app": "^23.8.6",
     "@react-native-firebase/firestore": "^23.8.6",
     "@react-native-firebase/messaging": "^23.8.6",
+    "@react-native-google-signin/google-signin": "^16.1.2",
     "@stardazed/streams-text-encoding": "^1.0.2",
     "@tanstack/react-query": "^5.83.0",
     "@ungap/structured-clone": "^1.3.0",
