@@ -1,41 +1,29 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-    ext {
-        // 기존 34.0.0에서 35.0.0으로 상향하여 라이브러리 충돌 방지
-        buildToolsVersion = "35.0.0" 
-        minSdkVersion = 24
-        compileSdkVersion = 35
-        targetSdkVersion = 35
-        ndkVersion = "29.0.14206865"
-    }
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath('com.android.tools.build:gradle')
-        classpath('com.facebook.react:react-native-gradle-plugin')
-        classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
-    classpath('com.google.gms:google-services:4.4.1') 
-    }
+  ext {
+    ndkVersion = "29.0.14206865"
+  }
+
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath 'com.google.gms:google-services:4.4.1'
+    classpath('com.android.tools.build:gradle')
+    classpath('com.facebook.react:react-native-gradle-plugin')
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+  }
 }
 
 allprojects {
-    repositories {
-        google()
-        mavenCentral()
-        maven { url 'https://www.jitpack.io' }
-
-        // --- [이 부분이 추가되어야 합니다] ---
-        // 프로젝트 내부 node_modules에 있는 React Native 안드로이드 라이브러리를 찾도록 설정
-        maven {
-            url "$rootDir/../node_modules/react-native/android"
-        }
-        // ------------------------------------
-    }
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+  }
 }
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
-apply plugin: 'com.google.gms.google-services'

@@ -1,4 +1,4 @@
-package com.nighton
+package com.mangoningning.nighton
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

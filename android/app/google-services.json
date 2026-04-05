@@ -7,6 +7,35 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:996742553850:android:dfbc7dae68ffc4a1dca943",
+        "android_client_info": {
+          "package_name": "com.mangoningning.nighton"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAfoaD9F11SkmsT2-0nyV-nw7906VxLtiQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:996742553850:android:bdce7c16c6e2ee79dca943",
         "android_client_info": {
           "package_name": "com.nighton"

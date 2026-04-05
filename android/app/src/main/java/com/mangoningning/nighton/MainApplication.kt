@@ -1,4 +1,4 @@
-package com.nighton
+package com.mangoningning.nighton
 
 import android.app.Application
 import android.content.res.Configuration

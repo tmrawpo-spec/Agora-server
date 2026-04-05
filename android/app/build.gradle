@@ -4,6 +4,10 @@ apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
+/**
+ * This is the configuration block to customize your React Native Android app.
+ * By default you don't need to apply any configuration, just uncomment the lines you need.
+ */
 react {
     entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", projectRoot, "android", "absolute"].execute(null, rootDir).text.trim())
     reactNativeDir = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
@@ -17,37 +21,34 @@ react {
     autolinkLibrariesWithApp()
 }
 
+/**
+ * Set this to true in release builds to optimize the app using R8.
+ */
 def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
+
+/**
+ * The preferred build flavor of JavaScriptCore (JSC)
+ */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
-    ndkVersion rootProject.ext.ndkVersion
+    ndkVersion "29.0.14206865"
+
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.nighton'
+    namespace 'com.mangoningning.nighton'
+
     defaultConfig {
-        applicationId 'com.nighton'
+        applicationId 'com.mangoningning.nighton'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 22
+        versionName "1.0.4"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
-
-      externalNativeBuild {
-            cmake {
-                // c++20 뒤에 gnu++20을 명시적으로 더 추가합니다.
-                cppFlags "-fexceptions", "-frtti", "-std=c++20", "-std=gnu++20", "-D_LIBCPP_HAS_NO_LIBRARY_ALIGNED_ALLOCATION"
-                arguments "-DANDROID_STL=c++_shared",
-                          "-DANDROID_NODE_JS_EXECUTABLE=node",
-                          "-DCMAKE_CXX_STANDARD=20",
-                          "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
-                          "-DANDROID_CPP_FEATURES=rtti exceptions"
-            }
-        }
     }
-    
+
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -55,13 +56,22 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            }
+        }
     }
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -70,20 +80,27 @@ android {
             crunchPngs enablePngCrunchInRelease.toBoolean()
         }
     }
+
     packagingOptions {
         jniLibs {
             def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
             useLegacyPackaging enableLegacyPackaging.toBoolean()
         }
     }
+
+    androidResources {
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
 }
 
-// [수정] 코파일럿이 제안한 Autolinking (No such property: url) 에러 방지용 안전 장치
+// Apply static values from `gradle.properties` to the `android.packagingOptions`
 ["pickFirsts", "excludes", "merges", "doNotStrip"].each { prop ->
     def options = (findProperty("android.packagingOptions.$prop") ?: "").split(",")
     for (i in 0..<options.size()) options[i] = options[i].trim()
     options -= ""
-    if (options.size() > 0) {
+
+    if (options.length > 0) {
+        println "android.packagingOptions.$prop += $options ($options.length)"
         options.each {
             android.packagingOptions[prop] += it
         }
@@ -92,6 +109,7 @@ android {
 
 dependencies {
     implementation("com.facebook.react:react-android")
+    implementation "com.android.billingclient:billing:7.1.1"
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true"
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true"
@@ -100,16 +118,19 @@ dependencies {
     if (isGifEnabled) {
         implementation("com.facebook.fresco:animated-gif:${expoLibs.versions.fresco.get()}")
     }
+
     if (isWebpEnabled) {
         implementation("com.facebook.fresco:webpsupport:${expoLibs.versions.fresco.get()}")
         if (isWebpAnimatedEnabled) {
             implementation("com.facebook.fresco:animated-webp:${expoLibs.versions.fresco.get()}")
         }
     }
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
     }
 }
+
 apply plugin: 'com.google.gms.google-services'
