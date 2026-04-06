@@ -4,4 +4,9 @@
 
 expo-env.d.ts
 # @end expo-cli
-node_modules
+node_modules/
+
+.expo/
+*.jks
+*.keystore
+upload_certificate.pem
