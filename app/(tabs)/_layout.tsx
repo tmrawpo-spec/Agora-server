@@ -1,29 +1,53 @@
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs } from "expo-router";
-import { NativeTabs, Icon, Label } from "expo-router/unstable-native-tabs";
+import { NativeTabs, Icon, Label, Badge } from "expo-router/unstable-native-tabs";
 import { BlurView } from "expo-blur";
 import { Platform, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
+import { useData } from "@/contexts/DataContext";
 import { t, Language } from "@/constants/i18n";
 
+type BadgeValue = string | number | undefined;
+
+function getUnreadBadgeValue(totalUnread: number): BadgeValue {
+  if (!totalUnread || totalUnread <= 0) return undefined;
+  if (totalUnread > 99) return "99+";
+  return totalUnread;
+}
+
 // --- NativeTabLayout (iOS용 특수 탭) ---
-function NativeTabLayout({ lang }: { lang: Language }) {
+function NativeTabLayout({
+  lang,
+  unreadBadge,
+}: {
+  lang: Language;
+  unreadBadge?: string;
+}) {
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: "person.2", selected: "person.2.fill" }} />
         <Label>{t(lang, "discover")}</Label>
       </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="match">
         <Icon sf={{ default: "moon.stars", selected: "moon.stars.fill" }} />
         <Label>{t(lang, "match")}</Label>
       </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="friends">
-        <Icon sf={{ default: "bubble.left.and.bubble.right", selected: "bubble.left.and.bubble.right.fill" }} />
-        <Label>{t(lang, "chat")}</Label> 
+        <Icon
+          sf={{
+            default: "bubble.left.and.bubble.right",
+            selected: "bubble.left.and.bubble.right.fill",
+          }}
+        />
+        <Label>{t(lang, "chat")}</Label>
+        {unreadBadge ? <Badge>{unreadBadge}</Badge> : null}
       </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="board">
         <Icon sf={{ default: "square.grid.2x2", selected: "square.grid.2x2.fill" }} />
         <Label>{t(lang, "board")}</Label>
@@ -33,7 +57,13 @@ function NativeTabLayout({ lang }: { lang: Language }) {
 }
 
 // --- ClassicTabLayout (Android / Web / 일반 iOS용) ---
-function ClassicTabLayout({ lang }: { lang: Language }) {
+function ClassicTabLayout({
+  lang,
+  unreadBadge,
+}: {
+  lang: Language;
+  unreadBadge?: string | number;
+}) {
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
 
@@ -43,6 +73,15 @@ function ClassicTabLayout({ lang }: { lang: Language }) {
         headerShown: false,
         tabBarActiveTintColor: Colors.accent,
         tabBarInactiveTintColor: Colors.textMuted,
+        tabBarBadgeStyle: {
+          backgroundColor: "#ff3b30",
+          color: "#ffffff",
+          fontSize: 11,
+          fontWeight: "700",
+          minWidth: 18,
+          height: 18,
+          lineHeight: 18,
+        },
         tabBarStyle: {
           position: "absolute",
           backgroundColor: isIOS ? "transparent" : Colors.backgroundElevated,
@@ -55,7 +94,12 @@ function ClassicTabLayout({ lang }: { lang: Language }) {
           isIOS ? (
             <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
           ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.backgroundElevated }]} />
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: Colors.backgroundElevated },
+              ]}
+            />
           ) : null,
       }}
     >
@@ -68,6 +112,7 @@ function ClassicTabLayout({ lang }: { lang: Language }) {
           ),
         }}
       />
+
       <Tabs.Screen
         name="match"
         options={{
@@ -77,15 +122,18 @@ function ClassicTabLayout({ lang }: { lang: Language }) {
           ),
         }}
       />
+
       <Tabs.Screen
         name="friends"
         options={{
           title: t(lang, "chat"),
+          tabBarBadge: unreadBadge,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="chatbubbles" size={size} color={color} />
           ),
         }}
       />
+
       <Tabs.Screen
         name="board"
         options={{
@@ -102,11 +150,32 @@ function ClassicTabLayout({ lang }: { lang: Language }) {
 // --- 메인 TabLayout ---
 export default function TabLayout() {
   const { user } = useAuth();
-  // ✅ 여기서 lang을 구독함으로써 언어 변경 시 TabLayout 전체가 리렌더링됩니다.
+  const { conversations } = useData();
+
   const lang = (user?.language || "en") as Language;
 
+  const totalUnread = conversations.reduce(
+    (sum, convo) => sum + Number(convo.unreadCount ?? 0),
+    0
+  );
+
+  const unreadBadgeValue = getUnreadBadgeValue(totalUnread);
+  const nativeUnreadBadgeText =
+    unreadBadgeValue === undefined ? undefined : String(unreadBadgeValue);
+
   if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout lang={lang} />;
+    return (
+      <NativeTabLayout
+        lang={lang}
+        unreadBadge={nativeUnreadBadgeText}
+      />
+    );
   }
-  return <ClassicTabLayout lang={lang} />;
+
+  return (
+    <ClassicTabLayout
+      lang={lang}
+      unreadBadge={unreadBadgeValue}
+    />
+  );
 }

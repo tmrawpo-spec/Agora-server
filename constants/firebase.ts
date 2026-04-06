@@ -1,11 +1,11 @@
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeAuth } from "firebase/auth";
 import { Firestore, getFirestore } from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const firebaseConfig = {
-  // 👇 보내주신 정확한 API 키로 수정했습니다.
-  apiKey: "AIzaSyC4jFZjA56XQoLBSjGGyBiMKPR42rLv_Sk", 
-  AIzaSyC4jFZjA56XQoLBSjGGyBiMKPR42rLv_SkauthDomain: "nighton-f6605.firebaseapp.com",
+  apiKey: "AIzaSyC4jFZjA56XQoLBSjGGyBiMKPR42rLv_Sk",
+  authDomain: "nighton-f6605.firebaseapp.com",
   projectId: "nighton-f6605",
   storageBucket: "nighton-f6605.firebasestorage.app",
   messagingSenderId: "996742553850",
@@ -13,11 +13,14 @@ const firebaseConfig = {
   measurementId: "G-RRF2JBD7TN",
 };
 
-// 파이어베이스 초기화
 const app = initializeApp(firebaseConfig);
 
-// 가장 안전하고 검증된 초기화 방식
-export const auth = getAuth(app);
+// @ts-ignore
+export const auth = initializeAuth(app, {
+  // @ts-ignore
+  persistence: require("firebase/auth").getReactNativePersistence(AsyncStorage),
+});
+
 export const db: Firestore = getFirestore(app);
 
 export default app;

@@ -3,10 +3,13 @@
     "name": "NightOn",
     "slug": "NightOn",
     "scheme": "com.nighton",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "icon": "./assets/images/icon.png",
     "splash": {
       "image": "./assets/images/splash-icon.png",
@@ -19,19 +22,21 @@
       "icon": "./assets/images/icon.png"
     },
     "android": {
-      "package": "com.nighton",
-      "incremental": true,
+      "package": "com.mangoningning.nighton",
+      "googleServicesFile": "./google-services.json",
       "icon": "./assets/images/icon.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#ffffff"
       },
       "permissions": [
+        "com.android.vending.BILLING",
         "com.google.android.gms.permission.AD_ID",
         "INTERNET",
         "RECORD_AUDIO",
-        "MODIFY_AUDIO_SETTINGS"
+        "MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "plugins": [
@@ -41,13 +46,24 @@
           "android": {
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
-            "buildToolsVersion": "35.0.0"
+            "buildToolsVersion": "35.0.0",
+            "ndkVersion": "29.0.14206865"
           }
         }
       ],
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
-      "@react-native-google-signin/google-signin"
-    ]
+      "@react-native-google-signin/google-signin",
+      "expo-audio",
+      "./plugins/withAppNdk29",
+      "expo-font",
+      "expo-asset",
+      "react-native-iap"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "c5b89bfe-c7a0-45d8-856e-bef422488e66"
+      }
+    }
   }
 }

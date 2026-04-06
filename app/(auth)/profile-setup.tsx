@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -33,15 +33,39 @@ export default function ProfileSetupScreen() {
   const [age, setAge] = useState(String(user?.age || 25));
   const [language, setLanguage] = useState<Language>(user?.language || "en");
   const [location, setLocation] = useState(user?.location || "");
+  const [locationCoords, setLocationCoords] = useState<
+    { lat: number; lon: number } | undefined
+  >(user?.locationCoords);
   const [profilePhoto, setProfilePhoto] = useState<string | undefined>(
-    user?.profilePhoto,
+    user?.profilePhoto
   );
-  const [locationGranted, setLocationGranted] = useState(false);
+  const [locationGranted, setLocationGranted] = useState(
+    typeof user?.locationCoords?.lat === "number" &&
+      typeof user?.locationCoords?.lon === "number"
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const lang = language;
   const languages: Language[] = ["en", "ko", "ja", "es"];
+
+  useEffect(() => {
+    if (!user) return;
+
+    setNickname(user.nickname || "");
+    setBio(user.bio || "");
+    setGender(user.gender || "male");
+    setAge(String(user.age || 25));
+    setLanguage((user.language || "en") as Language);
+    setLocation(user.location || "");
+    setLocationCoords(user.locationCoords);
+    setProfilePhoto(user.profilePhoto);
+    setLocationGranted(
+      typeof user.locationCoords?.lat === "number" &&
+        typeof user.locationCoords?.lon === "number"
+    );
+    setError("");
+  }, [user]);
 
   async function pickPhoto() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -49,30 +73,49 @@ export default function ProfileSetupScreen() {
       Alert.alert("Permission needed", "Please allow photo access.");
       return;
     }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
     });
+
     if (!result.canceled) {
       setProfilePhoto(result.assets[0].uri);
     }
   }
 
   async function requestLocation() {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission denied", "Location access was denied.");
-      return;
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+
+      if (status !== "granted") {
+        Alert.alert("Permission denied", "Location access was denied.");
+        setLocationGranted(false);
+        setLocationCoords(undefined);
+        return;
+      }
+
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const [geo] = await Location.reverseGeocodeAsync(loc.coords);
+      const city = geo?.city || geo?.subregion || geo?.region || "Unknown";
+
+      setLocation(city);
+      setLocationCoords({
+        lat: loc.coords.latitude,
+        lon: loc.coords.longitude,
+      });
+      setLocationGranted(true);
+      setError("");
+    } catch (e) {
+      Alert.alert("오류", "위치 정보를 가져오지 못했습니다.");
+      setLocationGranted(false);
+      setLocationCoords(undefined);
     }
-    const loc = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
-    const [geo] = await Location.reverseGeocodeAsync(loc.coords);
-    const city = geo?.city || geo?.region || "Unknown";
-    setLocation(city);
-    setLocationGranted(true);
   }
 
   async function handleSave() {
@@ -80,17 +123,29 @@ export default function ProfileSetupScreen() {
       setError("Nickname is required");
       return;
     }
+
     const ageNum = parseInt(age, 10);
     if (isNaN(ageNum) || ageNum < 19 || ageNum > 100) {
       setError("Age must be between 19 and 100");
       return;
     }
+
     if (!location.trim()) {
       setError("Location is required");
       return;
     }
 
+    if (
+      !locationCoords ||
+      typeof locationCoords.lat !== "number" ||
+      typeof locationCoords.lon !== "number"
+    ) {
+      setError("Please allow location access and set your location.");
+      return;
+    }
+
     setSaving(true);
+
     try {
       await updateProfile({
         nickname: nickname.trim(),
@@ -99,8 +154,13 @@ export default function ProfileSetupScreen() {
         age: ageNum,
         language,
         location: location.trim(),
+        locationCoords: {
+          lat: locationCoords.lat,
+          lon: locationCoords.lon,
+        },
         profilePhoto,
       });
+
       router.replace("/(tabs)");
     } catch (e) {
       Alert.alert("오류", "프로필 저장 중 문제가 발생했습니다.");
@@ -264,7 +324,8 @@ export default function ProfileSetupScreen() {
 
         <View style={styles.section}>
           <Text style={styles.label}>{t(lang, "location")} *</Text>
-          {locationGranted ? (
+
+          {locationGranted && locationCoords ? (
             <View style={styles.locationGranted}>
               <Ionicons name="location" size={16} color={Colors.teal} />
               <Text style={styles.locationText}>{location}</Text>
@@ -281,15 +342,17 @@ export default function ProfileSetupScreen() {
                   {t(lang, "allow_location")}
                 </Text>
               </Pressable>
-              <Text style={styles.locationOr}>— or type manually —</Text>
-              <TextInput
-                style={styles.input}
-                value={location}
-                onChangeText={setLocation}
-                placeholder="Your city"
-                placeholderTextColor={Colors.textMuted}
-              />
+
+              <Text style={styles.locationHint}>
+                위치 권한으로 좌표를 저장해야 거리 계산이 됩니다.
+              </Text>
             </View>
+          )}
+
+          {locationGranted && (
+            <Pressable style={styles.recheckBtn} onPress={requestLocation}>
+              <Text style={styles.recheckBtnText}>위치 다시 가져오기</Text>
+            </Pressable>
           )}
         </View>
 
@@ -466,11 +529,26 @@ const styles = StyleSheet.create({
     fontFamily: "Nunito_700Bold",
     fontSize: 15,
   },
-  locationOr: {
+  locationHint: {
     textAlign: "center",
     color: Colors.textMuted,
     fontFamily: "Nunito_400Regular",
     fontSize: 12,
+  },
+  recheckBtn: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: Colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  recheckBtnText: {
+    color: Colors.textSecondary,
+    fontFamily: "Nunito_700Bold",
+    fontSize: 13,
   },
   error: {
     color: Colors.danger,

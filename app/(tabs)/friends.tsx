@@ -45,16 +45,17 @@ function FriendItem({
       profilePhoto: p.profilePhoto,
       gender: p.gender,
       age: p.age,
-      location: p.location || (lang === "ko" ? "주변" : lang === "zh" ? "附近" : "Nearby"),
+      location:
+        p.location || (lang === "ko" ? "주변" : lang === "zh" ? "附近" : "Nearby"),
       voiceIntroUrl: p.voiceIntroUrl,
       isOnline: p.isOnline,
     };
 
     router.push({
       pathname: "/profile/[id]",
-      params: { 
-        id: p.id, 
-        profileData: JSON.stringify(profileData) 
+      params: {
+        id: p.id,
+        profileData: JSON.stringify(profileData),
       },
     });
   };
@@ -62,15 +63,22 @@ function FriendItem({
   return (
     <View style={[styles.item, isBlocked && styles.itemBlocked]}>
       <View style={styles.itemMain}>
-        <Pressable 
-          style={({ pressed }) => [styles.avatarWrap, pressed && !isBlocked && { opacity: 0.8 }]} 
+        <Pressable
+          style={({ pressed }) => [
+            styles.avatarWrap,
+            pressed && !isBlocked && { opacity: 0.8 },
+          ]}
           onPress={handleAvatarPress}
         >
           {p.profilePhoto ? (
             <Image source={{ uri: p.profilePhoto }} style={styles.avatar} />
           ) : (
             <LinearGradient
-              colors={p.gender === "female" ? [Colors.accent, "#c01f5d"] : [Colors.blue, "#2255aa"]}
+              colors={
+                p.gender === "female"
+                  ? [Colors.accent, "#c01f5d"]
+                  : [Colors.blue, "#2255aa"]
+              }
               style={styles.avatar}
             >
               <Ionicons
@@ -80,14 +88,20 @@ function FriendItem({
               />
             </LinearGradient>
           )}
+
           {!isBlocked && (
             <View
               style={[
                 styles.onlineDot,
-                { backgroundColor: p.isOnline ? Colors.success : Colors.textMuted },
+                {
+                  backgroundColor: p.isOnline
+                    ? Colors.success
+                    : Colors.textMuted,
+                },
               ]}
             />
           )}
+
           {isBlocked && (
             <View style={styles.blockedBadge}>
               <Ionicons name="ban" size={10} color="#fff" />
@@ -95,17 +109,29 @@ function FriendItem({
           )}
         </Pressable>
 
-        <Pressable 
-          style={({ pressed }) => [styles.info, pressed && !isBlocked && { opacity: 0.7 }]} 
+        <Pressable
+          style={({ pressed }) => [
+            styles.info,
+            pressed && !isBlocked && { opacity: 0.7 },
+          ]}
           onPress={isBlocked ? undefined : onChat}
         >
-          <Text style={[styles.name, isBlocked && styles.nameBlocked]}>{p.nickname}</Text>
+          <Text style={[styles.name, isBlocked && styles.nameBlocked]}>
+            {p.nickname}
+          </Text>
+
           <Text style={styles.sub} numberOfLines={1}>
             {isBlocked
-              ? (lang === "ko" ? "차단됨" : lang === "zh" ? "已屏蔽" : "Blocked")
+              ? lang === "ko"
+                ? "차단됨"
+                : lang === "zh"
+                ? "已屏蔽"
+                : "Blocked"
               : convo.lastMessage
               ? convo.lastMessage
-              : `${p.distanceKm || 0} km ${lang === "ko" ? "주변" : lang === "zh" ? "附近" : "away"}`}
+              : `${p.distanceKm || 0} km ${
+                  lang === "ko" ? "주변" : lang === "zh" ? "附近" : "away"
+                }`}
           </Text>
         </Pressable>
       </View>
@@ -124,16 +150,20 @@ function FriendItem({
                 <Ionicons name="chatbubble" size={16} color="#fff" />
               </LinearGradient>
             </Pressable>
-            <Pressable 
-              style={({ pressed }) => [styles.moreBtn, pressed && { opacity: 0.7 }]} 
+
+            <Pressable
+              style={({ pressed }) => [styles.moreBtn, pressed && { opacity: 0.7 }]}
               onPress={onBlock}
             >
               <Ionicons name="ban" size={20} color={Colors.textMuted} />
             </Pressable>
           </>
         ) : (
-          <Pressable 
-            style={({ pressed }) => [styles.unblockBtn, pressed && { backgroundColor: Colors.border }]} 
+          <Pressable
+            style={({ pressed }) => [
+              styles.unblockBtn,
+              pressed && { backgroundColor: Colors.border },
+            ]}
             onPress={onUnblock}
           >
             <Text style={styles.unblockText}>
@@ -152,31 +182,32 @@ export default function FriendsScreen() {
   const { conversations, blockFriend, unblockFriend, refreshConversations } = useData();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const lang = (user?.language || "ko") as Language; // 기본값 ko로 통일
+  const lang = (user?.language || "ko") as Language;
 
   const [tab, setTab] = useState<"friends" | "blocked">("friends");
 
-  // 화면이 포커스될 때마다 데이터 동기화
   useFocusEffect(
     useCallback(() => {
       refreshConversations();
     }, [refreshConversations])
   );
 
-  // ✅ [수정] 필터링 조건 강화: 차단되지 않았고, 대화방이 존재한다면 일단 노출
-  const friends = conversations.filter((c) => !c.isBlocked);
-  const blocked = conversations.filter((c) => c.isBlocked);
+  const friends = conversations.filter((c) => c.isFriend && !c.isBlocked);
+  const blocked = conversations.filter((c) => !!c.isBlocked);
 
   const handleBlock = async (convoId: string, nickname: string) => {
     Alert.alert(
       lang === "ko" ? "친구 차단" : lang === "zh" ? "屏蔽好友" : "Block Friend",
-      lang === "ko" 
-        ? `${nickname}님을 차단하시겠습니까? 친구 목록에서 삭제됩니다.` 
-        : lang === "zh" 
-        ? `确定要屏蔽 ${nickname} 吗？将从好友列表中移除。` 
+      lang === "ko"
+        ? `${nickname}님을 차단하시겠습니까? 친구 목록에서 삭제됩니다.`
+        : lang === "zh"
+        ? `确定要屏蔽 ${nickname} 吗？将从好友列表中移除。`
         : `Are you sure you want to block ${nickname}? They will be removed from your friends list.`,
       [
-        { text: lang === "ko" ? "취소" : lang === "zh" ? "取消" : "Cancel", style: "cancel" },
+        {
+          text: lang === "ko" ? "취소" : lang === "zh" ? "取消" : "Cancel",
+          style: "cancel",
+        },
         {
           text: lang === "ko" ? "차단" : lang === "zh" ? "屏蔽" : "Block",
           style: "destructive",
@@ -202,27 +233,31 @@ export default function FriendsScreen() {
     <View style={[styles.container, { paddingTop: topPad }]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t(lang, "chat")}</Text>
+
         <View style={styles.tabPills}>
           <Pressable
             style={[styles.pill, tab === "friends" && styles.pillActive]}
             onPress={() => {
-                Haptics.selectionAsync();
-                setTab("friends");
+              Haptics.selectionAsync();
+              setTab("friends");
             }}
           >
             <Text style={[styles.pillText, tab === "friends" && styles.pillTextActive]}>
-              {lang === "ko" ? "친구" : lang === "zh" ? "好友" : "Friends"} {friends.length > 0 ? `(${friends.length})` : ""}
+              {lang === "ko" ? "친구" : lang === "zh" ? "好友" : "Friends"}{" "}
+              {friends.length > 0 ? `(${friends.length})` : ""}
             </Text>
           </Pressable>
+
           <Pressable
             style={[styles.pill, tab === "blocked" && styles.pillActive]}
             onPress={() => {
-                Haptics.selectionAsync();
-                setTab("blocked");
+              Haptics.selectionAsync();
+              setTab("blocked");
             }}
           >
             <Text style={[styles.pillText, tab === "blocked" && styles.pillTextActive]}>
-              {lang === "ko" ? "차단됨" : lang === "zh" ? "已屏蔽" : "Blocked"} {blocked.length > 0 ? `(${blocked.length})` : ""}
+              {lang === "ko" ? "차단됨" : lang === "zh" ? "已屏蔽" : "Blocked"}{" "}
+              {blocked.length > 0 ? `(${blocked.length})` : ""}
             </Text>
           </Pressable>
         </View>
@@ -252,15 +287,33 @@ export default function FriendsScreen() {
               size={48}
               color={Colors.textMuted}
             />
+
             <Text style={styles.emptyTitle}>
-              {tab === "friends" 
-                ? (lang === "ko" ? "친구가 없습니다" : lang === "zh" ? "暂无好友" : "No friends yet") 
-                : (lang === "ko" ? "차단한 유저가 없습니다" : lang === "zh" ? "暂无屏蔽用户" : "No blocked users")}
+              {tab === "friends"
+                ? lang === "ko"
+                  ? "친구가 없습니다"
+                  : lang === "zh"
+                  ? "暂无好友"
+                  : "No friends yet"
+                : lang === "ko"
+                ? "차단한 유저가 없습니다"
+                : lang === "zh"
+                ? "暂无屏蔽用户"
+                : "No blocked users"}
             </Text>
+
             <Text style={styles.emptyText}>
               {tab === "friends"
-                ? (lang === "ko" ? "누군가와 매칭되고 대화를 시작해 친구가 되어보세요" : lang === "zh" ? "开始对话，结交好友吧" : "Start a conversation to make friends")
-                : (lang === "ko" ? "차단한 사용자들이 여기에 표시됩니다" : lang === "zh" ? "屏蔽的用户将显示在这里" : "Users you block will appear here")}
+                ? lang === "ko"
+                  ? "재화 메시지/전화 또는 상호 하트 이후 친구가 여기 표시됩니다"
+                  : lang === "zh"
+                  ? "付费消息/通话或互相点赞后，好友会显示在这里"
+                  : "Friends created by paid message/call or mutual hearts will appear here"
+                : lang === "ko"
+                ? "차단한 사용자들이 여기에 표시됩니다"
+                : lang === "zh"
+                ? "屏蔽的用户将显示在这里"
+                : "Users you block will appear here"}
             </Text>
           </View>
         }

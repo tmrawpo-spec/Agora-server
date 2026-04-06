@@ -7,6 +7,7 @@ import {
   Platform,
   PermissionsAndroid,
   Alert,
+  NativeModules,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,23 +26,26 @@ import { t, Language } from "@/constants/i18n";
 import { useAuth } from "@/contexts/AuthContext";
 import { useData } from "@/contexts/DataContext";
 import { db } from "@/constants/firebase";
-import { collection, addDoc } from "firebase/firestore";
+import { collection, addDoc, doc, updateDoc, arrayUnion } from "firebase/firestore";
+import BlockReportModal from "@/components/BlockReportModal";
 
 import { getAgoraEngine, destroyAgoraEngine } from "@/src/services/agoraEngine";
 import { AGORA_APP_ID, SERVER_URL } from "@/constants/agora";
 
-const CALL_DURATION_LIMIT = 7 * 60; // 표시용 (7분처럼 보임)
-const ACTUAL_CALL_LIMIT = 6 * 60;   // 실제 통화 시간 (6분)
-const TIMER_INTERVAL = CALL_DURATION_LIMIT / ACTUAL_CALL_LIMIT; // 1초당 타이머 감소량
+const { CallServiceModule } = NativeModules;
+
+const CALL_DURATION_LIMIT = 7 * 60;
+const ACTUAL_CALL_LIMIT = 6 * 60;
+const TIMER_INTERVAL = CALL_DURATION_LIMIT / ACTUAL_CALL_LIMIT;
 
 function pad(n: number) {
-  return String(n).padStart(2, "0");
+  return String(Math.max(0, Math.floor(n))).padStart(2, "0");
 }
 
 function formatTime(secs: number) {
-  const absSecs = Math.abs(secs);
+  const absSecs = Math.abs(Math.floor(secs));
   const m = Math.floor(absSecs / 60);
-  const s = Math.floor(absSecs % 60); // ✅ 소수점 버림
+  const s = Math.floor(absSecs % 60);
   return `${secs < 0 ? "-" : ""}${pad(m)}:${pad(s)}`;
 }
 
@@ -51,71 +55,79 @@ function uidFromString(str: string): number {
     hash = (hash << 5) - hash + str.charCodeAt(i);
     hash |= 0;
   }
-  return Math.abs(hash) % 999999 + 1; // 0 방지, 최대 999999
+  return Math.abs(hash) % 999999 + 1;
 }
+
+function firstString(value: string | string[] | undefined, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return fallback;
+}
+
 export default function CallingScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { refreshConversations, sendMessage, conversations } = useData();
+  const {
+    refreshConversations,
+    sendMessage,
+    conversations,
+    markConversationAsFriend,
+  } = useData();
+
   const lang = useMemo(() => (user?.language || "ko") as Language, [user?.language]);
 
-  // Agora 엔진
   const engineRef = useRef<any>(null);
-const localUidRef = useRef<number | null>(null);
-const isEndingRef = useRef(false); // 중복 종료 방지 플래그
+  const localUidRef = useRef<number | null>(null);
+  const isEndingRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasSentNotification = useRef(false);
 
-// 안전하게 엔진 정리하는 헬퍼
-async function safeDestroyEngine() {
-  if (!engineRef.current) return;
+  const callStateRef = useRef<"connecting" | "active">("connecting");
+  const elapsedSecondsRef = useRef(0);
 
-  try {
-    engineRef.current.leaveChannel();
-    console.log("[Agora] leaveChannel() called");
-  } catch (e) {
-    console.log("[Agora] leaveChannel error:", e);
-  }
-
-  try {
-    destroyAgoraEngine();
-    console.log("[Agora] engine.release() called");
-  } catch (e) {
-    console.log("[Agora] release error:", e);
-  }
-
-  engineRef.current = null;
-}
-
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockReason, setBlockReason] = useState<string | null>(null);
 
   const params = useLocalSearchParams<{
-    convoId: string;
-    profileName: string;
-    isAlreadyFriend: string;
-    isLookTab?: string;
-    targetToken?: string;
-    isReceiver?: string;
+    convoId?: string | string[];
+    profileName?: string | string[];
+    isAlreadyFriend?: string | string[];
+    isLookTab?: string | string[];
+    targetToken?: string | string[];
+    isReceiver?: string | string[];
+    callType?: string | string[];
   }>();
 
-  const convoId = params.convoId;
-  const profileName = params.profileName ?? "User";
-  const isLookMode = params.isLookTab === "true";
-  const targetToken = params.targetToken;
+  const convoId = firstString(params.convoId);
+  const profileName = firstString(params.profileName, "User");
+  const isLookMode = firstString(params.isLookTab) === "true";
+  const targetToken = firstString(params.targetToken);
+  const isReceiver = firstString(params.isReceiver) === "true";
+  const isAlreadyFriendParam = firstString(params.isAlreadyFriend) === "true";
+  const rawCallType = firstString(params.callType);
 
-  // ✅ convoId로 실제 친구 여부 확인 (수신자도 정확히 판단)
-  const convo = conversations.find(c => c.id === convoId);
-  const isFriend = convo?.isFriend === true || params.isAlreadyFriend === "true";
+  const convo = conversations.find((c) => c.id === convoId);
 
-  const [timeLeft, setTimeLeft] = useState(isFriend ? 0 : CALL_DURATION_LIMIT);
+  const callType: "random" | "paid" | "friend" =
+    rawCallType === "random" || rawCallType === "paid" || rawCallType === "friend"
+      ? rawCallType
+      : convo?.isFriend || isAlreadyFriendParam
+      ? "friend"
+      : "paid";
+
+  const isRandomCall = callType === "random";
+  const isPaidCall = callType === "paid";
+  const isFriendCall = callType === "friend";
+
+  const [timeLeft, setTimeLeft] = useState(isRandomCall ? CALL_DURATION_LIMIT : 0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [callState, setCallState] = useState<"connecting" | "active">("connecting");
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(true);
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasSentNotification = useRef(false);
-
   const pulseScale = useSharedValue(1);
   const pulseOpacity = useSharedValue(0.5);
 
-  // UI 애니메이션
   useEffect(() => {
     pulseScale.value = withRepeat(withTiming(1.4, { duration: 1200 }), -1, true);
     pulseOpacity.value = withRepeat(withTiming(0, { duration: 1200 }), -1, true);
@@ -126,143 +138,232 @@ async function safeDestroyEngine() {
     };
   }, []);
 
-  // Agora 초기화
   useEffect(() => {
-    async function initAgora() {
-  console.log("🎧 Agora 엔진 초기화 시작");
+    setTimeLeft(isRandomCall ? CALL_DURATION_LIMIT : 0);
+    setElapsedSeconds(0);
+    elapsedSecondsRef.current = 0;
+  }, [isRandomCall]);
 
-  if (Platform.OS === "android") {
-    const granted = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
-    );
-    if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-      Alert.alert(
-        t(lang, "permission_denied_title"),
-        t(lang, "permission_denied_msg")
+  useEffect(() => {
+    if (!convoId) return;
+    if (!isPaidCall) return;
+
+    markConversationAsFriend(convoId, "paid").catch((e) => {
+      console.log("paid 친구 처리 실패:", e);
+    });
+  }, [convoId, isPaidCall]);
+
+  async function startForegroundCallService(title?: string, text?: string) {
+    if (Platform.OS !== "android") return;
+    if (!CallServiceModule?.start) return;
+
+    try {
+      await CallServiceModule.start(
+        title ?? "통화 진행 중",
+        text ?? "앱 밖에서도 통화를 유지합니다"
       );
-      return;
+    } catch (e) {
+      console.log("[CallService] start error:", e);
     }
   }
 
-  const engine = getAgoraEngine();
-  engineRef.current = engine;
+  async function stopForegroundCallService() {
+    if (Platform.OS !== "android") return;
+    if (!CallServiceModule?.stop) return;
 
-  await engine.initialize({
-    appId: AGORA_APP_ID,
-    channelProfile: 1, // LiveBroadcasting
-  });
-  console.log("[Agora] engine initialized");
+    try {
+      await CallServiceModule.stop();
+    } catch (e) {
+      console.log("[CallService] stop error:", e);
+    }
+  }
 
-  engine.setClientRole(1); // Broadcaster
-  engine.enableAudio();
-  engine.setEnableSpeakerphone(true);
+  async function safeDestroyEngine() {
+    if (!engineRef.current) return;
 
-  // 이벤트 등록 먼저, 그 다음 채널 입장
-  registerAgoraEvents(engine);
-  await joinAgoraChannel();
-}
+    try {
+      engineRef.current.leaveChannel();
+    } catch (e) {
+      console.log("[Agora] leaveChannel error:", e);
+    }
+
+    try {
+      destroyAgoraEngine();
+    } catch (e) {
+      console.log("[Agora] release error:", e);
+    }
+
+    engineRef.current = null;
+  }
+
+  async function handleEndCall() {
+    if (isEndingRef.current) return;
+    isEndingRef.current = true;
+
+    try {
+      await safeDestroyEngine();
+    } catch (err) {
+      try {
+        await engineRef.current?.leaveChannel();
+      } catch (e) {}
+      engineRef.current = null;
+    }
+
+    await stopForegroundCallService();
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    } catch (e) {}
+
+    try {
+      if (convoId && user?.id) {
+        const wasConnected = callStateRef.current === "active";
+        const callDuration = elapsedSecondsRef.current;
+
+        if (wasConnected) {
+          const minutes = Math.floor(callDuration / 60);
+          const seconds = callDuration % 60;
+          const durationText =
+            minutes > 0 ? `📞 통화 ${minutes}분 ${seconds}초` : `📞 통화 ${seconds}초`;
+
+          await sendMessage(convoId, user.id, durationText, "call");
+        } else {
+          await sendMessage(convoId, user.id, "📵 부재중 통화", "missed_call");
+        }
+      }
+    } catch (e) {}
+
+    try {
+      await refreshConversations();
+    } catch (e) {}
+
+    try {
+      if (isLookMode) {
+        router.replace("/(tabs)/chat" as any);
+      } else if (isRandomCall) {
+        router.replace({
+          pathname: "/matching/decision",
+          params: { convoId: convoId ?? "", profileName: profileName ?? "" },
+        });
+      } else {
+        router.canGoBack()
+          ? router.back()
+          : router.replace("/(tabs)/chat" as any);
+      }
+    } catch (e) {}
+  }
+
+  useEffect(() => {
+    async function initAgora() {
+      console.log("🎧 Agora 엔진 초기화 시작");
+
+      if (Platform.OS === "android") {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+        );
+
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert(
+            t(lang, "permission_denied_title"),
+            t(lang, "permission_denied_msg")
+          );
+          return;
+        }
+      }
+
+      const engine = getAgoraEngine();
+      engineRef.current = engine;
+
+      await engine.initialize({ appId: AGORA_APP_ID, channelProfile: 1 });
+      engine.setClientRole(1);
+      engine.enableAudio();
+      engine.setEnableSpeakerphone(true);
+
+      await startForegroundCallService(
+        "통화 진행 중",
+        `${profileName}님과 통화 중`
+      );
+
+      registerAgoraEvents(engine);
+      await joinAgoraChannel();
+    }
 
     initAgora();
 
     return () => {
-  console.log("📞 Agora 엔진 종료");
-
-  // 비동기 정리 호출(리턴 콜백은 async일 수 없으므로 비동기 함수 호출만)
-  void safeDestroyEngine();
-
-  if (timerRef.current) clearInterval(timerRef.current);
-};
+      void safeDestroyEngine();
+      void stopForegroundCallService();
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
   }, []);
 
-  // 서버에서 토큰 받아오기 + joinChannel
   async function joinAgoraChannel() {
-  try {
-    const uid = user?.id ? uidFromString(user.id) : Math.floor(Math.random() * 999999) + 1;
-    console.log("🔑 Agora 토큰 요청 (channelName):", convoId, "localUserId:", user?.id, "→ uid:", uid);
+    try {
+      if (!convoId) return;
 
-    const res = await fetch(`${SERVER_URL}/rtc-token?channelName=${convoId}&uid=${uid}`);
-    const { token } = await res.json();
-    console.log("🔑 토큰 수신 완료, tokenExists:", !!token, "uid:", uid);
+      const uid = user?.id
+        ? uidFromString(user.id)
+        : Math.floor(Math.random() * 999999) + 1;
 
-    localUidRef.current = uid;
+      const res = await fetch(`${SERVER_URL}/rtc-token?channelName=${convoId}&uid=${uid}`);
+      const { token } = await res.json();
 
-    // v4 API: joinChannel(token, channelName, uid, options)
-    await engineRef.current?.joinChannel(token, convoId, uid, {});
-    console.log("📡 채널 입장 완료, channel:", convoId, "uid:", uid);
-
-    engineRef.current?.muteLocalAudioStream(false);
-    engineRef.current?.enableLocalAudio(true);
-    console.log("[Agora] local audio enabled");
-  } catch (e) {
-    console.log("❌ Agora 채널 입장 실패:", e);
+      localUidRef.current = uid;
+      await engineRef.current?.joinChannel(token, convoId, uid, {});
+      engineRef.current?.muteLocalAudioStream(false);
+      engineRef.current?.enableLocalAudio(true);
+    } catch (e) {
+      console.log("❌ Agora 채널 입장 실패:", e);
+    }
   }
-}
 
-  // Agora 이벤트 등록
   function registerAgoraEvents(engine: any) {
-  console.log("[Agora] registerAgoraEvents called");
+    engine.registerEventHandler({
+      onJoinChannelSuccess(connection: any) {
+        if (connection?.localUid) {
+          localUidRef.current = connection.localUid;
+        }
+      },
+      onUserJoined(connection: any, remoteUid: number) {
+        if (remoteUid === localUidRef.current) return;
 
-  engine.registerEventHandler({
-    onJoinChannelSuccess(connection: any, elapsed: number) {
-      console.log("[Agora Event] onJoinChannelSuccess uid:", connection?.localUid, "elapsed:", elapsed);
-      if (connection?.localUid) {
-        localUidRef.current = connection.localUid;
-      }
-    },
+        callStateRef.current = "active";
+        setCallState("active");
+        startTimer();
+      },
+      onUserOffline(connection: any, remoteUid: number) {
+        if (remoteUid === localUidRef.current) return;
+        handleEndCall();
+      },
+      onLeaveChannel() {},
+      onError(err: number, msg: string) {
+        console.log("[Agora Event] onError:", err, msg);
+      },
+    });
+  }
 
-    onUserJoined(connection: any, remoteUid: number, elapsed: number) {
-      console.log("[Agora Event] onUserJoined remoteUid:", remoteUid, "localUid:", localUidRef.current);
-
-      if (remoteUid === localUidRef.current) {
-        console.log("[Agora] 자기 자신 uid — 무시");
-        return;
-      }
-
-      console.log("✅ 상대방 입장 확인! 통화 시작");
-      setCallState("active");
-      startTimer();
-    },
-
-    onUserOffline(connection: any, remoteUid: number, reason: number) {
-      console.log("[Agora Event] onUserOffline remoteUid:", remoteUid, "reason:", reason);
-
-      if (remoteUid === localUidRef.current) return;
-
-      console.log("📴 상대방 퇴장 — 통화 종료");
-      handleEndCall();
-    },
-
-    onLeaveChannel(connection: any, stats: any) {
-      console.log("[Agora Event] onLeaveChannel stats:", stats);
-    },
-
-    onError(err: number, msg: string) {
-      console.log("[Agora Event] onError:", err, msg);
-    },
-  });
-}
-
-  // ✅ 1. 발신자 전용 FCM 알림 전송 로직 (수정본)
   useEffect(() => {
-    // 수신자 모드이면 알림을 보낼 필요가 없음
-    if (params.isReceiver === "true") {
-      console.log("📵 [Calling] 수신자 모드: 알림 전송 스킵");
-      return;
-    }
+    if (isReceiver) return;
+    if (!targetToken) return;
+    if (hasSentNotification.current) return;
 
-    // 핵심 수정: targetToken이 감지될 때까지 기다렸다가, 들어오는 순간 딱 한 번 실행
-    if (targetToken && !hasSentNotification.current) {
-      console.log("🚀 [Calling] 알림 전송 조건 충족! 서버로 요청을 보냅니다.");
-      sendNotification(targetToken);
-    }
-  }, [targetToken]); // 👈 빈 배열 []에서 [targetToken]으로 변경하여 토큰 로딩 대응
+    sendNotification(targetToken);
+  }, [targetToken, isReceiver, callType]);
 
-  // ✅ 2. 서버로 알림 요청을 보내는 함수
   const sendNotification = async (token: string) => {
     try {
-      // 주소 슬래시(/) 중복 방지 처리된 URL 생성
-      const fullUrl = `${SERVER_URL}/send-call-notification`.replace(/([^:]\/)\/+/g, "$1");
-      console.log("🔗 서버 요청 주소:", fullUrl);
+      const fullUrl = `${SERVER_URL}/send-call-notification`.replace(
+        /([^:]\/)\/+/g,
+        "$1"
+      );
 
       const response = await fetch(fullUrl, {
         method: "POST",
@@ -271,130 +372,85 @@ async function safeDestroyEngine() {
           targetToken: token,
           callerName: user?.nickname ?? "User",
           callerId: user?.id,
-          convoId: convoId,
+          convoId,
           callerToken: user?.fcmToken,
+          callType,
         }),
       });
 
       const resData = await response.json();
-
-      if (response.ok && resData.success) {
-        hasSentNotification.current = true; // ✅ 전송 성공 시에만 완료 표시
-        console.log("✅ [Calling] 서버 알림 발송 승인 완료");
-      } else {
-        console.log("❌ [Calling] 서버 응답 에러:", resData);
-        hasSentNotification.current = false;
-      }
+      hasSentNotification.current = Boolean(response.ok && resData.success);
     } catch (error) {
-      console.error("🔥 [Calling] 서버 통신 중 네트워크 에러:", error);
       hasSentNotification.current = false;
     }
   };
 
-  // 타이머
   function startTimer() {
     if (timerRef.current) return;
 
     timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (isFriend) return prev + 1;
-
-        // ✅ 실제 1초마다 타이머는 TIMER_INTERVAL만큼 줄어듦
-        // 6분(360초)이 흐르면 타이머는 7분(420초)에서 0이 됨
-        const next = prev - TIMER_INTERVAL;
-        if (next <= 0) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          handleEndCall();
-          return 0;
-        }
+      setElapsedSeconds((prev) => {
+        const next = prev + 1;
+        elapsedSecondsRef.current = next;
         return next;
       });
+
+      if (isRandomCall) {
+        setTimeLeft((prev) => {
+          const next = prev - TIMER_INTERVAL;
+
+          if (next <= 0) {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            handleEndCall();
+            return 0;
+          }
+
+          return next;
+        });
+      }
     }, 1000);
   }
 
-  // 통화 종료
-  async function handleEndCall() {
-  // 중복 호출 방지
-  if (isEndingRef.current) {
-    console.log("[Calling] handleEndCall already running — ignoring duplicate call");
-    return;
-  }
-  isEndingRef.current = true;
+  async function handleBlock(withReport: boolean) {
+    setShowBlockModal(false);
 
-  console.log("[Calling] handleEndCall called, engineRef exists:", !!engineRef.current, "localUid:", localUidRef.current, "callState:", callState);
+    if (user?.id && convo?.matchedUser?.id) {
+      try {
+        await updateDoc(doc(db, "users", user.id), {
+          blockedUsers: arrayUnion(convo.matchedUser.id),
+        });
 
-  try {
-    await safeDestroyEngine();
-  } catch (err) {
-    console.log("[Calling] handleEndCall safeDestroyEngine error:", err);
-    try { await engineRef.current?.leaveChannel(); } catch (e) { console.log("[Calling] fallback leaveChannel error:", e); }
-    engineRef.current = null;
-  }
-
-  if (timerRef.current) {
-    clearInterval(timerRef.current);
-    timerRef.current = null;
-  }
-
-  try {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-  } catch (e) {
-    console.log("[Calling] Haptics error:", e);
-  }
-
-  // ✅ 통화 기록 채팅에 남기기
-  try {
-    if (convoId && user?.id) {
-      const wasConnected = callState === "active";
-      const callDuration = CALL_DURATION_LIMIT - timeLeft;
-
-      if (wasConnected) {
-        // 통화 연결됐었던 경우 - 통화 시간 기록
-        const minutes = Math.floor(callDuration / 60);
-        const seconds = callDuration % 60;
-        const durationText = minutes > 0 
-          ? `📞 통화 ${minutes}분 ${seconds}초` 
-          : `📞 통화 ${seconds}초`;
-        await sendMessage(convoId, user.id, durationText, "call");
-      } else {
-        // 연결 안 됐던 경우 - 부재중 기록
-        await sendMessage(convoId, user.id, "📵 부재중 통화", "missed_call");
+        if (withReport && blockReason) {
+          await addDoc(collection(db, "reports"), {
+            reporterId: user.id,
+            reportedId: convo.matchedUser.id,
+            reason: blockReason,
+            createdAt: Date.now(),
+          });
+        }
+      } catch (e) {
+        console.log("차단/신고 실패:", e);
       }
     }
-  } catch (e) {
-    console.log("[Calling] 통화 기록 저장 실패:", e);
-  }
 
-  try {
-    await refreshConversations();
-  } catch (e) {
-    console.log("[Calling] refreshConversations failed:", e);
+    setBlockReason(null);
+    handleEndCall();
   }
-
-  try {
-    if (isLookMode) {
-      router.replace("/(tabs)/chat" as any);
-    } else if (isFriend) {
-      router.canGoBack() ? router.back() : router.replace("/(tabs)/chat" as any);
-    } else {
-      router.replace({
-        pathname: "/matching/decision",
-        params: { convoId: convoId ?? "", profileName: profileName ?? "" },
-      });
-    }
-  } catch (navErr) {
-    console.log("[Calling] navigation error after end call:", navErr);
-  }
-}
 
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
     opacity: pulseOpacity.value,
   }));
 
-  const progressPct = Math.max(0, (timeLeft / CALL_DURATION_LIMIT) * 100);
-  // ✅ 실제 1분 남은 시점 = 타이머상 7*60/6 = 70초
-const isWarning = !isFriend && timeLeft <= 70;
+  const progressPct = isRandomCall
+    ? Math.max(0, (timeLeft / CALL_DURATION_LIMIT) * 100)
+    : 0;
+
+  const isWarning = isRandomCall && timeLeft <= 70;
+  const timerDisplay = isRandomCall ? formatTime(timeLeft) : formatTime(elapsedSeconds);
 
   return (
     <View
@@ -409,18 +465,13 @@ const isWarning = !isFriend && timeLeft <= 70;
       />
 
       <Text style={styles.status}>
-        {callState === "connecting"
-          ? t(lang, "connecting")
-          : t(lang, "connected")}
+        {callState === "connecting" ? t(lang, "connecting") : t(lang, "connected")}
       </Text>
 
       <View style={styles.avatarSection}>
         <Animated.View style={[styles.pulseRing, pulseStyle]} />
         <View style={styles.avatarOuter}>
-          <LinearGradient
-            colors={[Colors.accent, "#c01f5d"]}
-            style={styles.avatarGrad}
-          >
+          <LinearGradient colors={[Colors.accent, "#c01f5d"]} style={styles.avatarGrad}>
             <Ionicons name="person" size={56} color="#fff" />
           </LinearGradient>
         </View>
@@ -428,9 +479,14 @@ const isWarning = !isFriend && timeLeft <= 70;
 
       <Text style={styles.callerName}>{profileName}</Text>
 
+      <Pressable style={styles.blockBtn} onPress={() => setShowBlockModal(true)}>
+        <Ionicons name="ban-outline" size={16} color={Colors.danger} />
+        <Text style={styles.blockBtnText}>차단/신고</Text>
+      </Pressable>
+
       {callState === "active" ? (
         <View style={styles.timerContainer}>
-          {!isFriend && (
+          {isRandomCall && (
             <View style={styles.progressBar}>
               <View
                 style={[
@@ -443,15 +499,24 @@ const isWarning = !isFriend && timeLeft <= 70;
               />
             </View>
           )}
+
           <Text style={[styles.timerText, isWarning && styles.timerWarning]}>
-            {formatTime(timeLeft)}
+            {timerDisplay}
+          </Text>
+
+          <Text style={styles.callTypeText}>
+            {isRandomCall
+              ? "랜덤 매칭 통화"
+              : isPaidCall
+              ? "유료 통화"
+              : isFriendCall
+              ? "친구 통화"
+              : ""}
           </Text>
         </View>
       ) : (
         <View style={styles.connectingDots}>
-          <Text style={styles.connectingText}>
-            {t(lang, "waiting_for_partner")}
-          </Text>
+          <Text style={styles.connectingText}>{t(lang, "waiting_for_partner")}</Text>
         </View>
       )}
 
@@ -472,10 +537,7 @@ const isWarning = !isFriend && timeLeft <= 70;
         </Pressable>
 
         <Pressable style={styles.endCallBtn} onPress={handleEndCall}>
-          <LinearGradient
-            colors={[Colors.danger, "#b01010"]}
-            style={styles.endCallBtnGrad}
-          >
+          <LinearGradient colors={[Colors.danger, "#b01010"]} style={styles.endCallBtnGrad}>
             <Ionicons
               name="call"
               size={30}
@@ -500,28 +562,150 @@ const isWarning = !isFriend && timeLeft <= 70;
           />
         </Pressable>
       </View>
+
+      <BlockReportModal
+        visible={showBlockModal}
+        onClose={() => {
+          setShowBlockModal(false);
+          setBlockReason(null);
+        }}
+        onConfirm={handleBlock}
+        selectedReason={blockReason}
+        onSelectReason={setBlockReason}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", justifyContent: "space-between", paddingVertical: 40, paddingHorizontal: 24 },
-  status: { fontSize: 14, color: Colors.textMuted, letterSpacing: 1, textTransform: "uppercase" },
-  avatarSection: { alignItems: "center", justifyContent: "center", width: 180, height: 180 },
-  pulseRing: { position: "absolute", width: 170, height: 170, borderRadius: 85, borderWidth: 2, borderColor: Colors.accent },
-  avatarOuter: { width: 130, height: 130, borderRadius: 65, overflow: "hidden", borderWidth: 3, borderColor: Colors.border },
-  avatarGrad: { flex: 1, alignItems: "center", justifyContent: "center" },
-  callerName: { fontSize: 32, fontWeight: "800", color: Colors.textPrimary, textAlign: "center" },
-  timerContainer: { width: "100%", alignItems: "center", gap: 10 },
-  progressBar: { width: "100%", height: 4, backgroundColor: Colors.border, borderRadius: 2, overflow: "hidden" },
-  progressFill: { height: "100%", borderRadius: 2 },
-  timerText: { fontSize: 48, fontWeight: "800", color: Colors.textPrimary, letterSpacing: -2 },
-  timerWarning: { color: Colors.danger },
-  controls: { flexDirection: "row", alignItems: "center", gap: 24, width: "100%", justifyContent: "center" },
-  controlBtn: { width: 60, height: 60, borderRadius: 30, backgroundColor: Colors.backgroundCard, borderWidth: 1, borderColor: Colors.border, alignItems: "center", justifyContent: "center" },
-  controlBtnActive: { backgroundColor: "rgba(232,70,124,0.15)", borderColor: Colors.accent },
-  endCallBtn: { borderRadius: 40, overflow: "hidden" },
-  endCallBtnGrad: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center" },
-  connectingDots: { alignItems: "center" },
-  connectingText: { color: Colors.textSecondary, fontSize: 16 },
+  container: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+  },
+  status: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  avatarSection: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 180,
+    height: 180,
+  },
+  pulseRing: {
+    position: "absolute",
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    borderWidth: 2,
+    borderColor: Colors.accent,
+  },
+  avatarOuter: {
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    overflow: "hidden",
+    borderWidth: 3,
+    borderColor: Colors.border,
+  },
+  avatarGrad: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  callerName: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: Colors.textPrimary,
+    textAlign: "center",
+  },
+  blockBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.danger,
+    backgroundColor: "rgba(255,50,50,0.08)",
+  },
+  blockBtnText: {
+    color: Colors.danger,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  timerContainer: {
+    width: "100%",
+    alignItems: "center",
+    gap: 10,
+  },
+  progressBar: {
+    width: "100%",
+    height: 4,
+    backgroundColor: Colors.border,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 2,
+  },
+  timerText: {
+    fontSize: 48,
+    fontWeight: "800",
+    color: Colors.textPrimary,
+    letterSpacing: -2,
+  },
+  timerWarning: {
+    color: Colors.danger,
+  },
+  callTypeText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  controls: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 24,
+    width: "100%",
+    justifyContent: "center",
+  },
+  controlBtn: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: Colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  controlBtnActive: {
+    backgroundColor: "rgba(232,70,124,0.15)",
+    borderColor: Colors.accent,
+  },
+  endCallBtn: {
+    borderRadius: 40,
+    overflow: "hidden",
+  },
+  endCallBtnGrad: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  connectingDots: {
+    alignItems: "center",
+  },
+  connectingText: {
+    color: Colors.textSecondary,
+    fontSize: 16,
+  },
 });

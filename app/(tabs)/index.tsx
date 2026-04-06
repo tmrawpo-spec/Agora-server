@@ -28,6 +28,10 @@ import { collection, query, where, getDocs, limit } from "firebase/firestore";
 
 type TabType = "all" | "nearby";
 
+type DiscoverProfile = UserProfile & {
+  hasDistance?: boolean;
+};
+
 function OnlineIndicator({ isOnline }: { isOnline: boolean }) {
   return (
     <View
@@ -39,13 +43,25 @@ function OnlineIndicator({ isOnline }: { isOnline: boolean }) {
   );
 }
 
+function getDistanceLabel(profile: DiscoverProfile | Visitor) {
+  if ("hasDistance" in profile && profile.hasDistance === false) {
+    return "거리 미설정";
+  }
+
+  if (typeof profile.distanceKm === "number") {
+    return `${profile.distanceKm} km`;
+  }
+
+  return "거리 미설정";
+}
+
 function ProfileCardItem({
   profile,
   onPress,
   isBlurred = false,
   myGender,
 }: {
-  profile: UserProfile | Visitor;
+  profile: DiscoverProfile | Visitor;
   onPress: () => void;
   isBlurred?: boolean;
   myGender?: Gender;
@@ -87,7 +103,7 @@ function ProfileCardItem({
       <View style={styles.cardInfo}>
         <Text style={styles.cardName}>{finalBlurred ? "???" : profile.nickname}</Text>
         <Text style={styles.cardSub}>
-          {profile.age} · {profile.distanceKm} km
+          {profile.age} · {getDistanceLabel(profile)}
         </Text>
       </View>
 
@@ -103,8 +119,9 @@ function calcDistance(lat1: number, lon1: number, lat2: number, lon2: number): n
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) ** 2;
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -116,7 +133,7 @@ export default function DiscoverScreen() {
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const lang = useMemo(() => (user?.language || "ko") as Language, [user?.language]);
 
-  const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
+  const [allProfiles, setAllProfiles] = useState<DiscoverProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("all");
@@ -126,8 +143,10 @@ export default function DiscoverScreen() {
 
   const loadRealUsers = useCallback(async () => {
     if (!user?.id || !user?.gender) return;
+
     setLoading(true);
     setLoadError(false);
+
     try {
       const oppositeGender = user.gender === "male" ? "female" : "male";
       const q = query(
@@ -135,23 +154,31 @@ export default function DiscoverScreen() {
         where("gender", "==", oppositeGender),
         limit(100)
       );
+
       const snap = await getDocs(q);
-      const profiles: UserProfile[] = [];
+      const profiles: DiscoverProfile[] = [];
 
       for (const d of snap.docs) {
         if (d.id === user.id) continue;
+
         const data = d.data();
 
         let distanceKm = 0;
-        if (user.locationCoords && data.locationCoords) {
-          distanceKm = Math.round(
-            calcDistance(
-              user.locationCoords.lat,
-              user.locationCoords.lon,
-              data.locationCoords.lat,
-              data.locationCoords.lon
-            )
-          );
+        let hasDistance = false;
+
+        const myLat = user.locationCoords?.lat;
+        const myLon = user.locationCoords?.lon;
+        const otherLat = data.locationCoords?.lat;
+        const otherLon = data.locationCoords?.lon;
+
+        if (
+          typeof myLat === "number" &&
+          typeof myLon === "number" &&
+          typeof otherLat === "number" &&
+          typeof otherLon === "number"
+        ) {
+          distanceKm = Math.round(calcDistance(myLat, myLon, otherLat, otherLon));
+          hasDistance = true;
         }
 
         profiles.push({
@@ -162,14 +189,21 @@ export default function DiscoverScreen() {
           language: data.language || "en",
           location: data.location || "",
           distanceKm,
+          hasDistance,
           profilePhoto: data.profilePhoto || "",
           isOnline: data.isOnline ?? false,
           fcmToken: data.fcmToken || "",
           voiceIntroUrl: data.voiceIntroUrl || "",
-        });
+        } as DiscoverProfile);
       }
 
-      profiles.sort((a, b) => a.distanceKm - b.distanceKm);
+      profiles.sort((a, b) => {
+        if (a.hasDistance && b.hasDistance) return a.distanceKm - b.distanceKm;
+        if (a.hasDistance && !b.hasDistance) return -1;
+        if (!a.hasDistance && b.hasDistance) return 1;
+        return 0;
+      });
+
       setAllProfiles(profiles);
     } catch (e) {
       console.error("유저 목록 불러오기 실패:", e);
@@ -179,34 +213,36 @@ export default function DiscoverScreen() {
     }
   }, [user?.id, user?.gender, user?.locationCoords]);
 
-  // 최초 로드
   useEffect(() => {
     if (user?.id && user?.gender) {
       loadRealUsers();
     }
-  }, [user?.id, user?.gender]);
+  }, [user?.id, user?.gender, user?.locationCoords, loadRealUsers]);
 
-  // 탭 포커스 시 재로드 (다른 탭 갔다 돌아올 때)
   useFocusEffect(
     useCallback(() => {
-      if (user?.id && user?.gender && allProfiles.length === 0) {
+      if (user?.id && user?.gender) {
         loadRealUsers();
       }
-    }, [user?.id, user?.gender, allProfiles.length])
+    }, [user?.id, user?.gender, user?.locationCoords, loadRealUsers])
   );
 
-  // 앱이 백그라운드에서 포그라운드로 복귀할 때 재로드
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active" && user?.id && user?.gender) {
         loadRealUsers();
       }
     });
+
     return () => subscription.remove();
-  }, [loadRealUsers]);
+  }, [loadRealUsers, user?.id, user?.gender]);
 
   const nearbySectionUsers = useMemo(
-    () => allProfiles.filter((p) => p.distanceKm <= 50),
+    () =>
+      allProfiles.filter((p) => {
+        if (p.hasDistance === false) return false;
+        return p.distanceKm <= 50;
+      }),
     [allProfiles]
   );
 
@@ -222,6 +258,7 @@ export default function DiscoverScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       return;
     }
+
     recordVisit(profile as UserProfile, user?.gender);
     router.push({
       pathname: "/profile/[id]",
@@ -236,6 +273,7 @@ export default function DiscoverScreen() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>My Visitors</Text>
           </View>
+
           <FlatList
             horizontal
             data={visitorSectionData}
@@ -259,15 +297,26 @@ export default function DiscoverScreen() {
       <View style={styles.tabBar}>
         <Pressable
           style={[styles.tabItem, activeTab === "all" && styles.activeTabItem]}
-          onPress={() => { Haptics.selectionAsync(); setActiveTab("all"); }}
+          onPress={() => {
+            Haptics.selectionAsync();
+            setActiveTab("all");
+          }}
         >
-          <Text style={[styles.tabText, activeTab === "all" && styles.activeTabText]}>All</Text>
+          <Text style={[styles.tabText, activeTab === "all" && styles.activeTabText]}>
+            All
+          </Text>
         </Pressable>
+
         <Pressable
           style={[styles.tabItem, activeTab === "nearby" && styles.activeTabItem]}
-          onPress={() => { Haptics.selectionAsync(); setActiveTab("nearby"); }}
+          onPress={() => {
+            Haptics.selectionAsync();
+            setActiveTab("nearby");
+          }}
         >
-          <Text style={[styles.tabText, activeTab === "nearby" && styles.activeTabText]}>Nearby</Text>
+          <Text style={[styles.tabText, activeTab === "nearby" && styles.activeTabText]}>
+            Nearby
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -279,14 +328,17 @@ export default function DiscoverScreen() {
         <Pressable style={styles.headerIconBtn} onPress={() => setShowSettings(true)}>
           <Ionicons name="settings-outline" size={22} color={Colors.textSecondary} />
         </Pressable>
+
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>{t(lang, "discover")}</Text>
         </View>
+
         <View style={styles.headerRight}>
           <Pressable style={styles.coinsChip} onPress={() => setShowSeedShop(true)}>
             <Text style={styles.seedEmoji}>🌻</Text>
             <Text style={styles.coinsText}>{user?.coins ?? 0}</Text>
           </Pressable>
+
           <Pressable style={styles.headerIconBtn} onPress={() => setShowEditProfile(true)}>
             <Ionicons name="person-circle-outline" size={24} color={Colors.textSecondary} />
           </Pressable>
@@ -301,7 +353,6 @@ export default function DiscoverScreen() {
           </Text>
         </View>
       ) : loadError ? (
-        // 에러 시 재시도 버튼
         <View style={styles.loadingContainer}>
           <Ionicons name="cloud-offline-outline" size={48} color={Colors.textMuted} />
           <Text style={styles.emptyText}>
@@ -337,7 +388,6 @@ export default function DiscoverScreen() {
           }
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
-          // 당겨서 새로고침
           onRefresh={loadRealUsers}
           refreshing={loading}
         />
@@ -353,17 +403,26 @@ export default function DiscoverScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingBottom: 12, paddingTop: 4, gap: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    paddingTop: 4,
+    gap: 8,
   },
   headerIconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   headerCenter: { flex: 1, alignItems: "center" },
   headerTitle: { fontSize: 20, fontWeight: "800", color: Colors.textPrimary },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
   coinsChip: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: Colors.backgroundCard, paddingHorizontal: 10,
-    paddingVertical: 6, borderRadius: 16, borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.backgroundCard,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
     borderColor: "rgba(245,200,66,0.3)",
   },
   seedEmoji: { fontSize: 14 },
@@ -372,8 +431,11 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 22, fontWeight: "900", color: Colors.textPrimary },
   horizontalList: { paddingHorizontal: 16, gap: 12, paddingBottom: 10 },
   tabBar: {
-    flexDirection: "row", paddingHorizontal: 16,
-    marginTop: 25, marginBottom: 15, gap: 15,
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    marginTop: 25,
+    marginBottom: 15,
+    gap: 15,
   },
   tabItem: { paddingBottom: 8, borderBottomWidth: 2, borderBottomColor: "transparent" },
   activeTabItem: { borderBottomColor: Colors.accent },
@@ -394,21 +456,42 @@ const styles = StyleSheet.create({
   },
   retryText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   card: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: Colors.backgroundCard, borderRadius: 16,
-    padding: 14, gap: 12, borderWidth: 1, borderColor: Colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.backgroundCard,
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   cardAvatar: { position: "relative", width: 56, height: 56 },
   avatar: { width: 56, height: 56, borderRadius: 28 },
-  avatarGrad: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center" },
+  avatarGrad: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   onlineDot: {
-    position: "absolute", bottom: 1, right: 1,
-    width: 12, height: 12, borderRadius: 6,
-    borderWidth: 2, borderColor: Colors.backgroundCard, zIndex: 10,
+    position: "absolute",
+    bottom: 1,
+    right: 1,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.backgroundCard,
+    zIndex: 10,
   },
   blurOverlay: {
-    ...StyleSheet.absoluteFillObject, borderRadius: 28,
-    overflow: "hidden", alignItems: "center", justifyContent: "center", zIndex: 5,
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 28,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 5,
   },
   cardInfo: { flex: 1 },
   cardName: { fontSize: 16, fontWeight: "700", color: Colors.textPrimary },

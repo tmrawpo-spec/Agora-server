@@ -1,0 +1,84 @@
+{
+  "project_info": {
+    "project_number": "996742553850",
+    "project_id": "nighton-f6605",
+    "storage_bucket": "nighton-f6605.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:996742553850:android:dfbc7dae68ffc4a1dca943",
+        "android_client_info": {
+          "package_name": "com.mangoningning.nighton"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAfoaD9F11SkmsT2-0nyV-nw7906VxLtiQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:996742553850:android:bdce7c16c6e2ee79dca943",
+        "android_client_info": {
+          "package_name": "com.nighton"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "996742553850-030dvkdb0rrnbipr9um22p8k4rbacpri.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nighton",
+            "certificate_hash": "b79cdce6c0ec0ea9eacff5a0bbc2be6f43bfa224"
+          }
+        },
+        {
+          "client_id": "996742553850-bgf0rtfqagd7jjg1cs4qdbd4e4v5va12.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nighton",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAfoaD9F11SkmsT2-0nyV-nw7906VxLtiQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "996742553850-275a0cb51akf9ucsbd385an1pq5tkrup.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

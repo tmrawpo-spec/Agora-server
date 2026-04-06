@@ -66,53 +66,53 @@ if (isNaN(uid)) {
     }
 });
 
-// 📞 통화 알림 (data-only)
+// 📞 통화 알림
 app.post("/send-call-notification", async (req: Request, res: Response) => {
-    const { targetToken, callerName, callerId, convoId, callerToken } = req.body;
+  const { targetToken, callerName, callerId, convoId, callerToken } = req.body;
 
-    if (!targetToken) {
-        return res.status(400).json({ error: "targetToken is required" });
-    }
+  if (!targetToken) {
+    return res.status(400).json({ error: "targetToken is required" });
+  }
 
-    const message: admin.messaging.Message = {
-  token: targetToken,
-  notification: {
-    title: callerName,
-    body: "전화가 왔습니다",
-  },
-  data: {
-    type: "VOICE_CALL",
-    callerName: String(callerName),
-    callerId: String(callerId || ""),
-    convoId: String(convoId),
-    callerToken: String(callerToken || ""),
-  },
-  android: {
-    priority: "high",
+  const message: admin.messaging.Message = {
+    token: targetToken,
     notification: {
-      channelId: "default",
-      sound: "default",
+      title: callerName,
+      body: "전화가 왔습니다",
     },
-  },
-  apns: {
-    payload: {
-      aps: {
-        alert: {
-          title: callerName,
-          body: "전화가 왔습니다",
-        },
+    data: {
+      type: "VOICE_CALL",
+      callerName: String(callerName),
+      callerId: String(callerId || ""),
+      convoId: String(convoId),
+      callerToken: String(callerToken || ""),
+    },
+    android: {
+      priority: "high",
+      notification: {
+        channelId: "call_channel",
         sound: "default",
       },
     },
-  },
-};
+    apns: {
+      payload: {
+        aps: {
+          alert: {
+            title: callerName,
+            body: "전화가 왔습니다",
+          },
+          sound: "default",
+        },
+      },
+    },
+  };
 
-    try {
-        const response = await admin.messaging().send(message);
-        res.json({ success: true, messageId: response });
-    } catch (error: any) {
-        res.status(500).json({ error: "FCM Send Failed", details: error.message });
-    }
+  try {
+    const response = await admin.messaging().send(message);
+    res.json({ success: true, messageId: response });
+  } catch (error: any) {
+    res.status(500).json({ error: "FCM Send Failed", details: error.message });
+  }
 });
 
 // 💬 채팅 메시지 알림

@@ -23,26 +23,35 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useData, Message } from "@/contexts/DataContext";
 import { SERVER_URL } from "@/constants/agora";
 import { Colors } from "@/constants/colors";
-import { t } from "@/constants/i18n";
+import { t, Language } from "@/constants/i18n";
+
+function firstString(value: string | string[] | undefined, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return fallback;
+}
 
 function MessageBubble({ msg, isMe }: { msg: Message; isMe: boolean }) {
-  // ✅ 통화 기록은 가운데 표시
   if (msg.type === "call" || msg.type === "missed_call") {
     return (
       <View style={styles.callRecordWrap}>
-        <View style={[
-          styles.callRecord,
-          { borderColor: msg.type === "missed_call" ? Colors.danger : Colors.teal }
-        ]}>
+        <View
+          style={[
+            styles.callRecord,
+            { borderColor: msg.type === "missed_call" ? Colors.danger : Colors.teal },
+          ]}
+        >
           <Ionicons
-            name={msg.type === "missed_call" ? "call" : "call"}
+            name="call"
             size={14}
             color={msg.type === "missed_call" ? Colors.danger : Colors.teal}
           />
-          <Text style={[
-            styles.callRecordText,
-            { color: msg.type === "missed_call" ? Colors.danger : Colors.teal }
-          ]}>
+          <Text
+            style={[
+              styles.callRecordText,
+              { color: msg.type === "missed_call" ? Colors.danger : Colors.teal },
+            ]}
+          >
             {msg.text}
           </Text>
         </View>
@@ -77,13 +86,21 @@ function MessageBubble({ msg, isMe }: { msg: Message; isMe: boolean }) {
 
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const convoId = firstString(params.id);
+
   const { user } = useAuth();
-  const { conversations, sendMessage, refreshConversations, subscribeToMessages } = useData();
+  const {
+  conversations,
+  sendMessage,
+  refreshConversations,
+  subscribeToMessages,
+  markConversationAsRead,
+} = useData();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
-  const lang = (user?.language as any) || "en";
+  const lang = ((user?.language as Language) || "ko") as Language;
 
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -91,24 +108,31 @@ export default function ChatScreen() {
   const flatRef = useRef<FlatList>(null);
 
   useFocusEffect(
-    useCallback(() => {
-      refreshConversations();
-    }, [id])
-  );
+  useCallback(() => {
+    if (!convoId) return;
 
-  // ✅ Firestore 실시간 메시지 구독
+    void refreshConversations();
+    void markConversationAsRead(convoId);
+  }, [convoId, refreshConversations, markConversationAsRead])
+);
+
   useEffect(() => {
-    if (!id) return;
-    const unsubscribe = subscribeToMessages(String(id), (msgs) => {
-      setRealtimeMsgs(msgs);
-    });
-    return () => unsubscribe();
-  }, [id]);
+  if (!convoId) return;
 
-  const convo = conversations.find((c) => String(c.id) === String(id));
-  // ✅ Firestore 실시간 메시지 우선 사용, 없으면 로컬 메시지
-  const msgs = realtimeMsgs.length > 0 ? realtimeMsgs : (convo?.messages ?? []);
+  void markConversationAsRead(convoId);
+
+  const unsubscribe = subscribeToMessages(convoId, (msgs) => {
+    setRealtimeMsgs(msgs);
+    void markConversationAsRead(convoId);
+  });
+
+  return () => unsubscribe();
+}, [convoId, subscribeToMessages, markConversationAsRead]);
+
+  const convo = conversations.find((c) => String(c.id) === String(convoId));
   const matchedUser = convo?.matchedUser;
+  const msgs = realtimeMsgs.length > 0 ? realtimeMsgs : (convo?.messages ?? []);
+
   const handleProfilePress = () => {
     if (!matchedUser) return;
 
@@ -130,17 +154,16 @@ export default function ChatScreen() {
   };
 
   async function handleSend() {
-    if (!text.trim() || !id || !user?.id) return;
+    if (!text.trim() || !convoId || !user?.id) return;
 
     const myText = text.trim();
     setText("");
     setSending(true);
 
     try {
-      await sendMessage(id, user.id, myText);
+      await sendMessage(convoId, user.id, myText);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-      // ✅ 상대방에게 FCM 알림 전송
       if (matchedUser?.fcmToken) {
         try {
           await fetch(`${SERVER_URL}/send-message-notification`, {
@@ -150,7 +173,7 @@ export default function ChatScreen() {
               targetToken: matchedUser.fcmToken,
               senderName: user.nickname ?? "User",
               message: myText,
-              convoId: id,
+              convoId,
             }),
           });
         } catch (e) {
@@ -163,9 +186,7 @@ export default function ChatScreen() {
       console.error("전송 에러:", error);
       Alert.alert(
         "Error",
-        lang === "ko"
-          ? "메시지 전송에 실패했습니다."
-          : "Failed to send message."
+        lang === "ko" ? "메시지 전송에 실패했습니다." : "Failed to send message."
       );
     } finally {
       setSending(false);
@@ -175,30 +196,39 @@ export default function ChatScreen() {
   async function handleCall() {
     if (!convo || !user || !matchedUser) return;
 
+    if (!convo.isFriend) {
+      Alert.alert(
+        lang === "ko" ? "알림" : "Notice",
+        lang === "ko"
+          ? "이 화면에서는 친구 상태일 때만 바로 통화할 수 있습니다."
+          : "Direct calling from this screen is only available for friends."
+      );
+      return;
+    }
+
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      // Firestore에서 상대방 푸시 토큰 조회
       const userRef = doc(db, "users", matchedUser.id);
       const snap = await getDoc(userRef);
 
       if (!snap.exists()) {
-        Alert.alert("Error", "User not found.");
+        Alert.alert("Error", lang === "ko" ? "상대 유저를 찾을 수 없습니다." : "User not found.");
         return;
       }
 
       const data = snap.data();
-const targetToken = data?.fcmToken || data?.TargetToken;
+      const targetToken = data?.fcmToken || data?.TargetToken;
 
-if (!targetToken) {
-  Alert.alert(
-    "Error",
-    lang === "ko"
-      ? "상대방의 푸시 토큰이 없습니다."
-      : "Target push token not found."
-  );
-  return;
-}
+      if (!targetToken) {
+        Alert.alert(
+          "Error",
+          lang === "ko"
+            ? "상대방의 푸시 토큰이 없습니다."
+            : "Target push token not found."
+        );
+        return;
+      }
 
       router.push({
         pathname: "/matching/calling",
@@ -208,21 +238,19 @@ if (!targetToken) {
           targetToken,
           isAlreadyFriend: "true",
           isLookTab: "false",
+          callType: "friend",
         },
       });
     } catch (error) {
       console.error("통화 연결 실패:", error);
       Alert.alert(
         "Error",
-        lang === "ko"
-          ? "통화 연결에 실패했습니다."
-          : "Failed to start call."
+        lang === "ko" ? "통화 연결에 실패했습니다." : "Failed to start call."
       );
     }
   }
 
-  // conversations 아직 로딩 안 된 경우
-  if (!conversations.length || !convo) {
+  if (!convo) {
     return (
       <View
         style={[
@@ -270,7 +298,7 @@ if (!targetToken) {
           <View>
             <Text style={styles.headerName}>{matchedUser?.nickname ?? "Chat"}</Text>
             <Text style={styles.headerSub}>
-              {matchedUser?.location} · {matchedUser?.age}
+              {matchedUser?.location || (lang === "ko" ? "주변" : "Nearby")} · {matchedUser?.age ?? "-"}
             </Text>
           </View>
         </Pressable>
@@ -295,14 +323,14 @@ if (!targetToken) {
             <MessageBubble msg={item} isMe={item.senderId === user?.id} />
           )}
           contentContainerStyle={styles.msgList}
-          onContentSizeChange={() =>
-            flatRef.current?.scrollToEnd({ animated: true })
-          }
+          onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: true })}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyChat}>
               <Ionicons name="chatbubbles-outline" size={40} color={Colors.textMuted} />
-              <Text style={styles.emptyChatText}>Say hello!</Text>
+              <Text style={styles.emptyChatText}>
+                {lang === "ko" ? "대화를 시작해보세요" : "Say hello!"}
+              </Text>
             </View>
           }
         />
@@ -320,6 +348,7 @@ if (!targetToken) {
             returnKeyType="send"
             onSubmitEditing={handleSend}
           />
+
           <Pressable
             onPress={handleSend}
             disabled={!text.trim() || sending}
@@ -358,27 +387,91 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   headerAvatar: { width: 40, height: 40, borderRadius: 20, overflow: "hidden" },
-  headerAvatarImg: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  headerAvatarImg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   headerName: { fontSize: 16, fontWeight: "700", color: Colors.textPrimary },
   headerSub: { fontSize: 12, fontWeight: "400", color: Colors.textSecondary },
   callBtn: { borderRadius: 20, overflow: "hidden" },
-  callBtnGrad: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 20 },
+  callBtnGrad: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+  },
   msgList: { paddingHorizontal: 16, paddingVertical: 16, gap: 8, flexGrow: 1 },
   bubbleWrap: { flexDirection: "row" },
   bubbleWrapMe: { justifyContent: "flex-end" },
   bubbleWrapOther: { justifyContent: "flex-start" },
-  bubble: { maxWidth: "75%", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
+  bubble: {
+    maxWidth: "75%",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+  },
   bubbleMe: { borderBottomRightRadius: 4 },
-  bubbleOther: { backgroundColor: Colors.backgroundCard, borderWidth: 1, borderColor: Colors.border, borderBottomLeftRadius: 4 },
+  bubbleOther: {
+    backgroundColor: Colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderBottomLeftRadius: 4,
+  },
   bubbleTextMe: { color: "#fff", fontSize: 15, lineHeight: 21 },
   bubbleTextOther: { color: Colors.textPrimary, fontSize: 15, lineHeight: 21 },
-  emptyChat: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 80, gap: 12 },
+  emptyChat: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 80,
+    gap: 12,
+  },
   emptyChatText: { color: Colors.textMuted, fontSize: 16 },
-  inputBar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 16, paddingTop: 10, gap: 10, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.background },
-  input: { flex: 1, backgroundColor: Colors.inputBackground, borderWidth: 1, borderColor: Colors.inputBorder, borderRadius: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, color: Colors.textPrimary, fontSize: 15, maxHeight: 100 },
+  inputBar: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: Colors.inputBackground,
+    borderWidth: 1,
+    borderColor: Colors.inputBorder,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    color: Colors.textPrimary,
+    fontSize: 15,
+    maxHeight: 100,
+  },
   sendBtn: { borderRadius: 20, overflow: "hidden" },
-  sendBtnGrad: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22 },
+  sendBtnGrad: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+  },
   callRecordWrap: { alignItems: "center", marginVertical: 4 },
-  callRecord: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1, backgroundColor: "rgba(0,0,0,0.2)" },
+  callRecord: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
   callRecordText: { fontSize: 13, fontWeight: "600" },
 });
